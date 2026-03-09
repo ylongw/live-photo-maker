@@ -25,6 +25,11 @@ struct ContentView: View {
     /// Cancellable task for debounced cover frame extraction.
     @State private var coverPreviewTask: Task<Void, Never>?
 
+    /// When true, AVPlayer loops between startTime and endTime.
+    @State private var isLoopPreview = false
+    /// Opaque token from addBoundaryTimeObserver; must be removed before player changes.
+    @State private var loopObserver: Any? = nil
+
     var body: some View {
         VStack(spacing: 0) {
             // Top bar
@@ -125,15 +130,41 @@ struct ContentView: View {
                                 }
                             }
 
-                            // Seek button
-                            HStack {
-                                Button("Seek to Cover Frame") {
-                                    let time = CMTime(seconds: coverTime, preferredTimescale: 600)
-                                    player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+                            // Loop preview + seek controls
+                            HStack(spacing: 16) {
+                                // Loop Preview toggle
+                                Toggle(isOn: $isLoopPreview) {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "repeat")
+                                        Text("Loop Preview")
+                                    }
                                 }
-                                .controlSize(.small)
+                                .toggleStyle(.checkbox)
+                                .help("Loop playback within the selected clip range")
+                                .onChange(of: isLoopPreview) { on in
+                                    if on { startLoopPreview() } else { stopLoopPreview() }
+                                }
+                                .onChange(of: startTime) { _ in
+                                    if isLoopPreview { startLoopPreview() }
+                                }
+                                .onChange(of: endTime) { _ in
+                                    if isLoopPreview { startLoopPreview() }
+                                }
+
+                                if isLoopPreview {
+                                    Text("\(formatTime(startTime)) – \(formatTime(endTime))")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .monospacedDigit()
+                                }
 
                                 Spacer()
+
+                                Button("Seek to Cover") {
+                                    let t = CMTime(seconds: coverTime, preferredTimescale: 600)
+                                    player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+                                }
+                                .controlSize(.small)
 
                                 Button("Open Different Video") {
                                     openVideoFile()
@@ -273,7 +304,51 @@ struct ContentView: View {
         return true
     }
 
+    // ── Loop preview ───────────────────────────────────────────────────────────
+
+    private func startLoopPreview() {
+        guard let player = player else { return }
+        // Remove any existing observer first
+        if let obs = loopObserver { player.removeTimeObserver(obs); loopObserver = nil }
+
+        let startCM = CMTime(seconds: startTime, preferredTimescale: 600)
+        let endCM   = CMTime(seconds: max(endTime, startTime + 0.05), preferredTimescale: 600)
+
+        // Seek to start and begin playing
+        player.seek(to: startCM, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+            player.play()
+        }
+
+        // Fire when playback crosses endTime → seek back to startTime
+        let capturedStart = startTime
+        loopObserver = player.addBoundaryTimeObserver(
+            forTimes: [NSValue(time: endCM)],
+            queue: .main
+        ) { [weak player] in
+            let s = CMTime(seconds: capturedStart, preferredTimescale: 600)
+            player?.seek(to: s, toleranceBefore: .zero, toleranceAfter: .zero)
+            player?.play()
+        }
+    }
+
+    private func stopLoopPreview() {
+        if let obs = loopObserver { player?.removeTimeObserver(obs); loopObserver = nil }
+        player?.pause()
+    }
+
+    private func formatTime(_ seconds: Double) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        let frac = Int((seconds.truncatingRemainder(dividingBy: 1)) * 100)
+        return String(format: "%d:%02d.%02d", mins, secs, frac)
+    }
+
+    // ── Load video ──────────────────────────────────────────────────────────────
+
     private func loadVideo(url: URL) {
+        // Clean up before loading new video
+        stopLoopPreview()
+        isLoopPreview = false
         videoURL = url
         coverFramePreview = nil
         coverPreviewTask?.cancel()
