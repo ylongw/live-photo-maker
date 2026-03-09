@@ -1,0 +1,25 @@
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V8
+.Trashes
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Binaries / build output (don't commit compiled app)
+*.app/
+*.o
+*.d
