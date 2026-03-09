@@ -64,6 +64,27 @@ The build script compiles all Swift sources with `swiftc`, packages the `.app` b
 
 When the source video is HDR (HLG or PQ), the cover frame extracted by `AVAssetImageGenerator` carries the original `CGColorSpace` — the HEIC is written with the correct color space for true HDR display on supported screens. The exported MOV retains the original HDR metadata via `AVAssetExportSession`.
 
+## ⚠️ First Launch: Gatekeeper Warning
+
+The release DMG is **ad-hoc signed** (no paid Apple Developer certificate), so macOS will show a security warning on first launch.
+
+### Method 1 — System Settings (no Terminal needed)
+
+1. Try to open the app — macOS will show "Not Opened" dialog. Click **Done**.
+2. Open **System Settings → Privacy & Security**
+3. Scroll down — you'll see **"LivePhotoMaker was blocked from use because it is not from an identified developer"**
+4. Click **Open Anyway** → confirm in the next dialog
+
+### Method 2 — Terminal
+
+```bash
+xattr -dr com.apple.quarantine /Applications/LivePhotoMaker.app
+```
+
+Then double-click the app normally.
+
+> **Why this happens:** Apple requires a $99/year Developer account and notarization to bypass Gatekeeper automatically. Building from source with `./build.sh` on your own machine avoids this entirely.
+
 ## Background
 
 This project grew out of exploring the Live Photo file format on macOS, where Apple's `PHAssetResourceType.pairedVideo` is unavailable, making programmatic Live Photo creation much harder than on iOS. See [`makelive`](https://github.com/RhetTbull/makelive) for the Python equivalent using CoreGraphics + AVFoundation directly.
