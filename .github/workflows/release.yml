@@ -9,7 +9,7 @@ on:
 jobs:
   build-dmg:
     name: Build macOS DMG
-    runs-on: macos-14          # Apple Silicon (M1), has Xcode + Swift pre-installed
+    runs-on: macos-15          # Apple Silicon, Xcode 16+ with macOS 15 SDK (required for dynamicRangePolicy)
     permissions:
       contents: write          # required to create releases and upload assets
 
