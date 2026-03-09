@@ -25,6 +25,9 @@ enum BitratePreset: String, CaseIterable, Identifiable {
 @MainActor
 class VideoProcessor: ObservableObject {
     @Published var isHDR = false
+    /// Whether to preserve HDR when exporting. Only shown when isHDR == true.
+    /// When false, the export pipeline tone-maps to SDR (H.264).
+    @Published var exportHDR = true
     @Published var duration: Double = 0
     @Published var progress: Double = 0
     @Published var statusMessage = ""
@@ -35,9 +38,11 @@ class VideoProcessor: ObservableObject {
     func loadAsset(url: URL) async -> AVAsset {
         let asset = AVAsset(url: url)
         do {
-            let duration = try await asset.load(.duration)
-            self.duration = CMTimeGetSeconds(duration)
-            self.isHDR = await detectHDR(asset: asset)
+            let dur = try await asset.load(.duration)
+            self.duration = CMTimeGetSeconds(dur)
+            let detected = await detectHDR(asset: asset)
+            self.isHDR = detected
+            self.exportHDR = detected   // default ON when HDR source
         } catch {
             statusMessage = "Failed to load video: \(error.localizedDescription)"
         }
@@ -52,11 +57,11 @@ class VideoProcessor: ObservableObject {
             for desc in descriptions {
                 let formatDesc = desc as CMFormatDescription
                 if let extensions = CMFormatDescriptionGetExtensions(formatDesc) as? [String: Any] {
-                    if let transferFunction = extensions[kCVImageBufferTransferFunctionKey as String] as? String {
+                    if let tf = extensions[kCVImageBufferTransferFunctionKey as String] as? String {
                         let hlg = kCVImageBufferTransferFunction_ITU_R_2100_HLG as String
-                        let pq = kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ as String
-                        if transferFunction == hlg || transferFunction == pq {
-                            hdrTransferFunction = transferFunction as CFString
+                        let pq  = kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ as String
+                        if tf == hlg || tf == pq {
+                            hdrTransferFunction = tf as CFString
                             return true
                         }
                     }
@@ -73,7 +78,6 @@ class VideoProcessor: ObservableObject {
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
-
         let (cgImage, _) = try await generator.image(at: time)
         return cgImage
     }
@@ -87,16 +91,7 @@ class VideoProcessor: ObservableObject {
         ) else {
             throw LivePhotoError.failedToCreateImageDestination
         }
-
-        var properties: [CFString: Any] = [:]
-
-        if let colorSpace = cgImage.colorSpace {
-            properties[kCGImageDestinationOptimizeColorForSharing] = false
-            _ = colorSpace // Color space is preserved via CGImageDestination from the source CGImage
-        }
-
-        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
-
+        CGImageDestinationAddImage(destination, cgImage, nil)
         if !CGImageDestinationFinalize(destination) {
             throw LivePhotoError.failedToWriteImage
         }
@@ -116,26 +111,7 @@ class VideoProcessor: ObservableObject {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mov")
 
-        let presetName: String
-        switch bitratePreset {
-        case .low:
-            presetName = AVAssetExportPresetMediumQuality
-        case .medium:
-            presetName = AVAssetExportPresetHighestQuality
-        case .high:
-            if #available(macOS 14.0, *) {
-                let hevcSupported = await AVAssetExportSession.compatibility(
-                    ofExportPreset: AVAssetExportPresetHEVCHighestQuality,
-                    with: asset,
-                    outputFileType: .mov
-                )
-                presetName = hevcSupported ? AVAssetExportPresetHEVCHighestQuality : AVAssetExportPresetHighestQuality
-            } else {
-                presetName = AVAssetExportPresetHEVCHighestQuality
-            }
-        case .original:
-            presetName = AVAssetExportPresetPassthrough
-        }
+        let presetName = resolveExportPreset(bitratePreset: bitratePreset)
 
         try await exportWithExportSession(
             asset: asset,
@@ -149,6 +125,35 @@ class VideoProcessor: ObservableObject {
         progress = 1.0
         statusMessage = "Video export complete."
         return outputURL
+    }
+
+    /// Choose the right AVAssetExportSession preset based on bitrate + HDR flag.
+    ///
+    /// HDR path  → HEVC (H.265), which natively carries HLG/PQ metadata.
+    ///             AVAssetExportPresetHEVCHighestQuality preserves the transfer function
+    ///             and color primaries from the source.
+    /// SDR path  → H.264 presets, which tonemap HDR → SDR automatically.
+    /// Original  → Passthrough (no re-encode); always preserves HDR if present.
+    private func resolveExportPreset(bitratePreset: BitratePreset) -> String {
+        switch bitratePreset {
+        case .original:
+            return AVAssetExportPresetPassthrough
+
+        case .low:
+            return isHDR && exportHDR
+                ? AVAssetExportPresetHEVC1920x1080         // HEVC 1080p — smaller, still HDR
+                : AVAssetExportPresetMediumQuality
+
+        case .medium:
+            return isHDR && exportHDR
+                ? AVAssetExportPresetHEVCHighestQuality
+                : AVAssetExportPresetHighestQuality
+
+        case .high:
+            return isHDR && exportHDR
+                ? AVAssetExportPresetHEVCHighestQuality
+                : AVAssetExportPresetHighestQuality
+        }
     }
 
     private func exportWithExportSession(
@@ -167,11 +172,6 @@ class VideoProcessor: ObservableObject {
         session.shouldOptimizeForNetworkUse = false
         session.timeRange = CMTimeRange(start: startTime, end: endTime)
 
-        // Preserve HDR metadata
-        if isHDR {
-            session.metadata = try await buildHDRMetadata(asset: asset)
-        }
-
         let progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -182,41 +182,11 @@ class VideoProcessor: ObservableObject {
         await session.export()
         progressTimer.invalidate()
 
-        if let error = session.error {
-            throw error
-        }
+        if let error = session.error { throw error }
 
         guard session.status == .completed else {
             throw LivePhotoError.exportFailed(session.status.rawValue)
         }
-    }
-
-    private func buildHDRMetadata(asset: AVAsset) async throws -> [AVMetadataItem] {
-        var items: [AVMetadataItem] = []
-
-        let tracks = try await asset.loadTracks(withMediaType: .video)
-        guard let track = tracks.first else { return items }
-        let descriptions = try await track.load(.formatDescriptions)
-        guard let formatDesc = descriptions.first else { return items }
-
-        if let extensions = CMFormatDescriptionGetExtensions(formatDesc) as? [String: Any] {
-            let keysToPreserve = [
-                kCVImageBufferColorPrimariesKey as String,
-                kCVImageBufferTransferFunctionKey as String,
-                kCVImageBufferYCbCrMatrixKey as String,
-            ]
-            for key in keysToPreserve {
-                if let value = extensions[key] as? String {
-                    let item = AVMutableMetadataItem()
-                    item.key = key as NSString
-                    item.keySpace = .quickTimeMetadata
-                    item.value = value as NSString
-                    items.append(item)
-                }
-            }
-        }
-
-        return items
     }
 }
 
@@ -231,20 +201,13 @@ enum LivePhotoError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .failedToCreateImageDestination:
-            return "Failed to create image destination for HEIC."
-        case .failedToWriteImage:
-            return "Failed to write cover image."
-        case .exportSessionCreationFailed:
-            return "Failed to create export session."
-        case .exportFailed(let status):
-            return "Export failed with status \(status)."
-        case .noVideoTrack:
-            return "No video track found in asset."
-        case .failedToWriteMetadata:
-            return "Failed to write metadata."
-        case .contentIdentifierWriteFailed:
-            return "Failed to write content identifier."
+        case .failedToCreateImageDestination: return "Failed to create image destination for HEIC."
+        case .failedToWriteImage:             return "Failed to write cover image."
+        case .exportSessionCreationFailed:    return "Failed to create export session."
+        case .exportFailed(let s):            return "Export failed with status \(s)."
+        case .noVideoTrack:                   return "No video track found in asset."
+        case .failedToWriteMetadata:          return "Failed to write metadata."
+        case .contentIdentifierWriteFailed:   return "Failed to write content identifier."
         }
     }
 }

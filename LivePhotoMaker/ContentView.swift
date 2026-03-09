@@ -20,6 +20,11 @@ struct ContentView: View {
     @State private var showError = false
     @State private var errorMessage = ""
 
+    /// Live preview frame shown above the red cover-time handle.
+    @State private var coverFramePreview: NSImage?
+    /// Cancellable task for debounced cover frame extraction.
+    @State private var coverPreviewTask: Task<Void, Never>?
+
     var body: some View {
         VStack(spacing: 0) {
             // Top bar
@@ -61,9 +66,26 @@ struct ContentView: View {
                             coverTime: $coverTime,
                             startTime: $startTime,
                             endTime: $endTime,
-                            thumbnails: thumbnails
+                            thumbnails: thumbnails,
+                            coverFramePreview: coverFramePreview
                         )
                         .padding(.horizontal)
+                        .padding(.top, coverFramePreview != nil ? 60 : 0) // room for the popup
+                        .onChange(of: coverTime) { newTime in
+                            // Debounced cover frame extraction (150 ms)
+                            coverPreviewTask?.cancel()
+                            coverPreviewTask = Task {
+                                try? await Task.sleep(nanoseconds: 150_000_000)
+                                guard !Task.isCancelled, let asset = asset else { return }
+                                let time = CMTime(seconds: newTime, preferredTimescale: 600)
+                                if let cgImage = try? await processor.extractCoverFrame(asset: asset, at: time) {
+                                    coverFramePreview = NSImage(
+                                        cgImage: cgImage,
+                                        size: NSSize(width: cgImage.width, height: cgImage.height)
+                                    )
+                                }
+                            }
+                        }
 
                         // Controls
                         VStack(spacing: 12) {
@@ -78,6 +100,29 @@ struct ContentView: View {
                                 }
                                 .pickerStyle(.segmented)
                                 .frame(maxWidth: 500)
+                            }
+
+                            // HDR export toggle — only shown for HDR source videos
+                            if processor.isHDR {
+                                HStack(spacing: 8) {
+                                    Toggle(isOn: $processor.exportHDR) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "sparkles.tv")
+                                                .foregroundColor(.purple)
+                                            Text("Export HDR")
+                                                .font(.subheadline)
+                                        }
+                                    }
+                                    .toggleStyle(.checkbox)
+
+                                    Text(processor.exportHDR
+                                         ? "HEVC / H.265 — HLG color space preserved"
+                                         : "H.264 — tone-mapped to SDR")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+
+                                    Spacer()
+                                }
                             }
 
                             // Seek button
@@ -230,6 +275,8 @@ struct ContentView: View {
 
     private func loadVideo(url: URL) {
         videoURL = url
+        coverFramePreview = nil
+        coverPreviewTask?.cancel()
         let avAsset = AVAsset(url: url)
         asset = avAsset
         player = AVPlayer(url: url)
