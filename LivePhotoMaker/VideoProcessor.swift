@@ -172,9 +172,10 @@ class VideoProcessor: ObservableObject {
             session.metadata = try await buildHDRMetadata(asset: asset)
         }
 
-        let progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.progress = Double(session.progress)
+        let progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.progress = Double(session.progress)
             }
         }
 
