@@ -3,7 +3,7 @@
 # Works locally and on GitHub Actions macos-14 runners.
 set -e
 
-SDK=$(xcrun --show-sdk-path 2>/dev/null || echo "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+SDK=$(xcrun --show-sdk-path 2>/dev/null || echo "/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk")
 OUT_BIN="/tmp/LivePhotoMaker_bin"
 APP_BUNDLE="${BUILD_DIR:-$(pwd)}/LivePhotoMaker.app"
 

@@ -43,7 +43,11 @@ class LivePhotoCreator {
         ]
 
         let properties: [CFString: Any] = [
-            kCGImagePropertyMakerAppleDictionary: makerAppleDict
+            kCGImagePropertyMakerAppleDictionary: makerAppleDict,
+            // CRITICAL for HDR: prevent CGImageDestination from converting the
+            // wide-color / HLG CGImage to sRGB when writing HEIC.
+            // With this false, the original CGColorSpace (e.g. ITU_R_2100_HLG) is preserved.
+            kCGImageDestinationOptimizeColorForSharing: false
         ]
 
         CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)

@@ -78,6 +78,12 @@ class VideoProcessor: ObservableObject {
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
+        // Request HDR/wide-color output — keeps HLG/PQ color space in the returned CGImage.
+        // Default is ForceSDR (tone-maps to 8-bit sRGB); MatchSource preserves HLG/PQ.
+        // Available macOS 15+; on older versions we get a tone-mapped frame (graceful degradation).
+        if #available(macOS 15.0, *) {
+            generator.dynamicRangePolicy = .matchSource
+        }
         let (cgImage, _) = try await generator.image(at: time)
         return cgImage
     }

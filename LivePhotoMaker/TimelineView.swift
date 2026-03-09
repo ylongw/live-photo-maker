@@ -120,27 +120,37 @@ struct TimelineView: View {
             .frame(height: 60)
 
             // ── Trim sliders ─────────────────────────────────────────────────────
+            // NOTE: All range constraints are applied via .onChange to run DURING dragging,
+            // not just on release. The cover slider uses a safe clamped range to prevent
+            // a crash when lowerBound > upperBound (which happens if start > end mid-drag).
             HStack(spacing: 20) {
                 VStack(alignment: .leading) {
                     Text("Start: \(formatTime(startTime))")
                         .font(.caption).monospacedDigit()
-                    Slider(value: $startTime, in: 0...max(duration, 0.01)) { _ in
-                        if startTime >= endTime { startTime = max(0, endTime - 0.1) }
-                        if coverTime < startTime { coverTime = startTime }
-                    }
+                    Slider(value: $startTime, in: 0...max(duration, 0.01))
+                        .onChange(of: startTime) { val in
+                            // Prevent start overtaking end during drag
+                            if val >= endTime { startTime = max(0, endTime - 0.1) }
+                            if coverTime < startTime { coverTime = startTime }
+                        }
                 }
                 VStack(alignment: .leading) {
                     Text("End: \(formatTime(endTime))")
                         .font(.caption).monospacedDigit()
-                    Slider(value: $endTime, in: 0...max(duration, 0.01)) { _ in
-                        if endTime <= startTime { endTime = min(duration, startTime + 0.1) }
-                        if coverTime > endTime { coverTime = endTime }
-                    }
+                    Slider(value: $endTime, in: 0...max(duration, 0.01))
+                        .onChange(of: endTime) { val in
+                            // Prevent end overtaking start during drag
+                            if val <= startTime { endTime = min(duration, startTime + 0.1) }
+                            if coverTime > endTime { coverTime = endTime }
+                        }
                 }
                 VStack(alignment: .leading) {
                     Text("Cover: \(formatTime(coverTime))")
                         .font(.caption).monospacedDigit()
-                    Slider(value: $coverTime, in: max(0, startTime)...max(endTime, 0.01))
+                    // Safe range: always lower <= upper regardless of start/end order
+                    let coverLower = min(startTime, endTime)
+                    let coverUpper = max(startTime, endTime, 0.01)
+                    Slider(value: $coverTime, in: coverLower...coverUpper)
                 }
             }
 
