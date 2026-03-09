@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # build.sh — Build LivePhotoMaker.app without Xcode (macOS Command Line Tools only)
+# Works locally and on GitHub Actions macos-14 runners.
 set -e
 
 SDK=$(xcrun --show-sdk-path 2>/dev/null || echo "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
 OUT_BIN="/tmp/LivePhotoMaker_bin"
-APP_BUNDLE="LivePhotoMaker.app"
+APP_BUNDLE="${BUILD_DIR:-$(pwd)}/LivePhotoMaker.app"
 
-echo "🔨 Compiling..."
+echo "🔨 SDK: $SDK"
+echo "📦 Output: $APP_BUNDLE"
+
 swiftc \
   -sdk "$SDK" \
   -target arm64-apple-macos13.0 \
@@ -42,5 +45,4 @@ echo "✍️  Signing (ad-hoc)..."
 codesign --force --deep --sign - "$APP_BUNDLE"
 
 echo ""
-echo "✅ Done! Run with:"
-echo "   open $APP_BUNDLE"
+echo "✅ Built: $APP_BUNDLE"

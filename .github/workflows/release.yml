@@ -1,0 +1,52 @@
+name: Build & Release DMG
+
+# Triggers on version tags: v1.0.0, v1.2.3, etc.
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-dmg:
+    name: Build macOS DMG
+    runs-on: macos-14          # Apple Silicon (M1), has Xcode + Swift pre-installed
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build LivePhotoMaker.app
+        run: |
+          chmod +x build.sh
+          BUILD_DIR="$GITHUB_WORKSPACE" ./build.sh
+
+      - name: Create DMG
+        run: |
+          APP="$GITHUB_WORKSPACE/LivePhotoMaker.app"
+          DMG="$GITHUB_WORKSPACE/LivePhotoMaker.dmg"
+          STAGING="$GITHUB_WORKSPACE/dmg_staging"
+
+          mkdir -p "$STAGING"
+          cp -R "$APP" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+
+          hdiutil create \
+            -volname "LivePhotoMaker" \
+            -srcfolder "$STAGING" \
+            -ov \
+            -format UDZO \
+            "$DMG"
+
+          echo "DMG size: $(du -sh "$DMG" | cut -f1)"
+
+      - name: Upload DMG to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: LivePhotoMaker.dmg
+          # Release notes are written by you (via git tag message or GitHub UI)
+          # generate_release_notes: true  # uncomment to auto-gen from commits
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
