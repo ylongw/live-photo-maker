@@ -105,7 +105,7 @@ struct ContentView: View {
                 mainEditingArea
             }
         }
-        .frame(minWidth: fileQueue.isEmpty ? 700 : 880, minHeight: 600)
+        .frame(minWidth: fileQueue.isEmpty ? 800 : 1000, minHeight: 700)
         .alert("Error", isPresented: $showError) { Button("OK") {} } message: { Text(errorMessage) }
         .onDrop(of: [.fileURL], isTargeted: $isDragOver) { handleDrop(providers: $0) }
     }
@@ -190,7 +190,7 @@ struct ContentView: View {
                             // Video preview
                             GlassCard(cornerRadius: 16) {
                                 VideoPlayerView(player: player)
-                                    .frame(minHeight: 280, maxHeight: 380)
+                                    .frame(minHeight: 420, maxHeight: 620)
                                     .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
                             .padding(.horizontal, 24)
