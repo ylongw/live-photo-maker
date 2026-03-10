@@ -4,20 +4,82 @@ import CoreVideo
 import AppKit
 import UniformTypeIdentifiers
 
+// ── Platform export presets ────────────────────────────────────────────────────
+/// Platform-specific export presets. Each preset locks codec, resolution, and HDR
+/// to the effective ceiling of the target platform so the output isn't over-encoded.
+enum PlatformPreset: String, CaseIterable, Identifiable {
+    case custom      = "Custom"
+    case xiaohongshu = "小红书 XHS"
+    case douyin      = "抖音"
+
+    var id: String { rawValue }
+
+    /// Short flag label for the picker button (nil = use rawValue).
+    var label: String {
+        switch self {
+        case .custom:      return "Custom"
+        case .xiaohongshu: return "🍠 小红书"
+        case .douyin:      return "🎵 抖音"
+        }
+    }
+
+    /// Informational footnote shown beneath the controls.
+    var note: String? {
+        switch self {
+        case .xiaohongshu:
+            return "H.264 · 720p · 4 Mbps · SDR — XHS re-encodes to ≤4 Mbps; 建议时长 ≤2.8s"
+        case .douyin:
+            return "H.264 · 1080p · 5 Mbps · SDR — ⚠️ 抖音图片帖不支持 Live Photo 动效，仅封面展示"
+        case .custom:
+            return nil
+        }
+    }
+
+    /// Recommended maximum clip duration (seconds). nil = no restriction.
+    var maxDuration: Double? {
+        switch self {
+        case .xiaohongshu: return 2.8
+        default: return nil
+        }
+    }
+
+    /// When true the HDR toggle is force-disabled.
+    var forcesSDR: Bool { self != .custom }
+
+    /// BitratePreset to apply when this platform is selected.
+    var bitratePreset: BitratePreset {
+        switch self {
+        case .xiaohongshu: return .xhs720p
+        case .douyin:      return .douyin1080p
+        case .custom:      return .medium
+        }
+    }
+}
+
+// ── Bitrate presets ────────────────────────────────────────────────────────────
 enum BitratePreset: String, CaseIterable, Identifiable {
-    case low = "Low (8 Mbps)"
-    case medium = "Medium (16 Mbps)"
-    case high = "High (32 Mbps)"
+    // Platform-specific (only set via PlatformPreset; hidden from normal picker)
+    case xhs720p    = "XHS 720p (4 Mbps)"
+    case douyin1080p = "Douyin 1080p (5 Mbps)"
+    // User-selectable
+    case low     = "Low (8 Mbps)"
+    case medium  = "Medium (16 Mbps)"
+    case high    = "High (32 Mbps)"
     case original = "Original"
 
     var id: String { rawValue }
 
+    /// Cases shown in the normal bitrate picker (platform cases hidden).
+    static var displayCases: [BitratePreset] { [.low, .medium, .high, .original] }
+
     var bitsPerSecond: Int? {
         switch self {
-        case .low: return 8_000_000
-        case .medium: return 16_000_000
-        case .high: return 32_000_000
-        case .original: return nil
+        case .xhs720p:    return 4_000_000
+        case .douyin1080p: return 5_000_000
+        case .low:        return 8_000_000
+        case .medium:     return 16_000_000
+        case .high:       return 32_000_000
+        case .original:   return nil
         }
     }
 }
@@ -133,21 +195,33 @@ class VideoProcessor: ObservableObject {
         return outputURL
     }
 
-    /// Choose the right AVAssetExportSession preset based on bitrate + HDR flag.
+    /// Resolve AVAssetExportSession preset string from BitratePreset + HDR flag.
     ///
-    /// HDR path  → HEVC (H.265), which natively carries HLG/PQ metadata.
-    ///             AVAssetExportPresetHEVCHighestQuality preserves the transfer function
-    ///             and color primaries from the source.
-    /// SDR path  → H.264 presets, which tonemap HDR → SDR automatically.
-    /// Original  → Passthrough (no re-encode); always preserves HDR if present.
+    /// Platform presets (.xhs720p / .douyin1080p):
+    ///   Always H.264 (SDR) at a capped resolution — matching each platform's effective ceiling.
+    ///   XHS re-encodes uploads to ≤720p/4 Mbps; Douyin tops out at 1080p/~5 Mbps.
+    ///
+    /// HDR path  → HEVC, preserving HLG/PQ transfer function + bt2020 primaries.
+    /// SDR path  → H.264, tonemap HDR→SDR automatically.
+    /// Original  → Passthrough (no re-encode).
     private func resolveExportPreset(bitratePreset: BitratePreset) -> String {
         switch bitratePreset {
         case .original:
             return AVAssetExportPresetPassthrough
 
+        // ── Platform-specific ──────────────────────────────────────────────────
+        case .xhs720p:
+            // H.264 720p — XHS displays ≤720p for Live Photo MOV component; cap input here
+            return AVAssetExportPreset1280x720
+
+        case .douyin1080p:
+            // H.264 1080p — Douyin's quality ceiling for video
+            return AVAssetExportPreset1920x1080
+
+        // ── Standard ──────────────────────────────────────────────────────────
         case .low:
             return isHDR && exportHDR
-                ? AVAssetExportPresetHEVC1920x1080         // HEVC 1080p — smaller, still HDR
+                ? AVAssetExportPresetHEVC1920x1080
                 : AVAssetExportPresetMediumQuality
 
         case .medium:

@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var startTime: Double = 0
     @State private var endTime: Double = 0
     @State private var bitratePreset: BitratePreset = .medium
+    @State private var platformPreset: PlatformPreset = .custom
     @State private var thumbnails: [NSImage] = []
 
     @State private var isDragOver = false
@@ -191,17 +192,88 @@ struct ContentView: View {
 
                         // Controls
                         VStack(spacing: 12) {
-                            // Bitrate selector
+
+                            // ── Platform preset picker ─────────────────────────
+                            HStack(spacing: 8) {
+                                Text("Optimized for:")
+                                    .font(.subheadline)
+                                ForEach(PlatformPreset.allCases) { preset in
+                                    Button(preset.label) {
+                                        applyPlatformPreset(preset)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .tint(platformPreset == preset ? .accentColor : .secondary)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(platformPreset == preset
+                                                  ? Color.accentColor.opacity(0.12)
+                                                  : Color.clear)
+                                    )
+                                }
+                                Spacer()
+                            }
+
+                            // Platform note + XHS duration warning
+                            if let note = platformPreset.note {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "info.circle")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(note)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                            }
+
+                            // XHS duration warning
+                            if platformPreset == .xiaohongshu,
+                               let maxDur = platformPreset.maxDuration,
+                               (endTime - startTime) > maxDur {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                        .font(.caption)
+                                    Text("当前片段 \(String(format: "%.1f", endTime - startTime))s 超过 2.8s，小红书 Live Photo 动效可能不触发")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                    Spacer()
+                                    Button("自动裁剪") {
+                                        endTime = min(startTime + maxDur, processor.duration)
+                                        if coverTime > endTime { coverTime = endTime }
+                                    }
+                                    .controlSize(.mini)
+                                    .buttonStyle(.bordered)
+                                    .tint(.orange)
+                                }
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.orange.opacity(0.08)))
+                            }
+
+                            // ── Bitrate selector ──────────────────────────────
                             HStack {
                                 Text("Bitrate:")
                                     .font(.subheadline)
                                 Picker("", selection: $bitratePreset) {
-                                    ForEach(BitratePreset.allCases) { preset in
+                                    ForEach(BitratePreset.displayCases) { preset in
                                         Text(preset.rawValue).tag(preset)
                                     }
                                 }
                                 .pickerStyle(.segmented)
                                 .frame(maxWidth: 500)
+                                .disabled(platformPreset != .custom)
+                                .opacity(platformPreset != .custom ? 0.5 : 1.0)
+
+                                // Show locked label when platform preset overrides bitrate
+                                if platformPreset != .custom {
+                                    Text(platformPreset.bitratePreset.rawValue)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .padding(.horizontal, 8).padding(.vertical, 3)
+                                        .background(Capsule().fill(Color.secondary.opacity(0.1)))
+                                }
                             }
 
                             // HDR export toggle — only shown for HDR source videos
@@ -216,8 +288,9 @@ struct ContentView: View {
                                         }
                                     }
                                     .toggleStyle(.checkbox)
+                                    .disabled(platformPreset.forcesSDR)
 
-                                    Text(processor.exportHDR
+                                    Text(processor.exportHDR && !platformPreset.forcesSDR
                                          ? "HEVC / H.265 — HLG color space preserved"
                                          : "H.264 — tone-mapped to SDR")
                                         .font(.caption)
@@ -400,6 +473,16 @@ struct ContentView: View {
         loadVideoContent(url: fileQueue[index].url)
     }
 
+    // ── Platform preset ────────────────────────────────────────────────────────
+
+    private func applyPlatformPreset(_ preset: PlatformPreset) {
+        platformPreset = preset
+        if preset != .custom {
+            bitratePreset = preset.bitratePreset
+            if preset.forcesSDR { processor.exportHDR = false }
+        }
+    }
+
     // ── Loop preview ───────────────────────────────────────────────────────────
 
     private func startLoopPreview() {
@@ -444,6 +527,7 @@ struct ContentView: View {
     private func loadVideoContent(url: URL) {
         stopLoopPreview()
         isLoopPreview = false
+        platformPreset = .custom
         videoURL = url
         coverFramePreview = nil
         coverPreviewTask?.cancel()
