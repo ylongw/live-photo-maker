@@ -88,8 +88,9 @@ struct ContentView: View {
 
     @State private var coverFramePreview: NSImage?
     @State private var coverPreviewTask:  Task<Void, Never>?
-    @State private var isLoopPreview = false
-    @State private var loopObserver: Any? = nil
+    @State private var isLoopPreview   = false
+    @State private var loopObserver:   Any? = nil
+    @State private var isPortraitVideo = false   // auto-detected on video load
 
     var body: some View {
         ZStack {
@@ -105,7 +106,10 @@ struct ContentView: View {
                 mainEditingArea
             }
         }
-        .frame(minWidth: fileQueue.isEmpty ? 800 : 1000, minHeight: 700)
+        .frame(minWidth: isPortraitVideo
+            ? (fileQueue.isEmpty ? 920 : 1120)
+            : (fileQueue.isEmpty ? 800 : 1000),
+               minHeight: 700)
         .alert("Error", isPresented: $showError) { Button("OK") {} } message: { Text(errorMessage) }
         .onDrop(of: [.fileURL], isTargeted: $isDragOver) { handleDrop(providers: $0) }
     }
@@ -184,242 +188,259 @@ struct ContentView: View {
             .padding(.horizontal, 24).padding(.vertical, 16)
 
             if let player = player {
-                ZStack(alignment: .bottom) {
-                    ScrollView {
-                        VStack(spacing: 20) {
-                            // Video preview
-                            GlassCard(cornerRadius: 16) {
-                                VideoPlayerView(player: player)
-                                    .frame(minHeight: 420, maxHeight: 620)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                if isPortraitVideo {
+                    // ── Portrait: controls left ↔ video right ──────────────────
+                    HStack(alignment: .top, spacing: 0) {
+                        // Left: scrollable controls + sticky export bar
+                        VStack(spacing: 0) {
+                            ScrollView {
+                                VStack(spacing: 16) {
+                                    timelineSection
+                                        .padding(.horizontal, 16)
+                                    quickControlsSection
+                                        .padding(.horizontal, 20)
+                                        .padding(.top, -4)
+                                    exportSettingsPanel
+                                        .padding(.horizontal, 16)
+                                        .padding(.bottom, 16)
+                                }
+                                .padding(.vertical, 16)
                             }
-                            .padding(.horizontal, 24)
-
-                            // Timeline
-                            GlassCard {
-                                TimelineView(
-                                    duration: processor.duration,
-                                    coverTime: $coverTime,
-                                    startTime: $startTime,
-                                    endTime:   $endTime,
-                                    thumbnails: thumbnails,
-                                    coverFramePreview: coverFramePreview
-                                )
-                                .padding(.top, coverFramePreview != nil ? 90 : 0)
-                            }
-                            .padding(.horizontal, 24)
-                            .onChange(of: coverTime) { newTime in
-                                updateCoverPreview(at: newTime)
-                            }
-
-                            // Quick controls — directly below timeline
-                            HStack(spacing: 10) {
-                                // Loop preview toggle
-                                Toggle(isOn: $isLoopPreview) {
-                                    Label("Loop Preview", systemImage: "repeat")
-                                        .font(.system(size: 12))
-                                }
-                                .toggleStyle(.checkbox)
-                                .onChange(of: isLoopPreview) { on in
-                                    if on { startLoopPreview() } else { stopLoopPreview() }
-                                }
-                                .onChange(of: startTime) { _ in if isLoopPreview { startLoopPreview() } }
-                                .onChange(of: endTime)   { _ in if isLoopPreview { startLoopPreview() } }
-
-                                if isLoopPreview {
-                                    Text("\(formatTime(startTime)) – \(formatTime(endTime))")
-                                        .font(.caption).foregroundColor(.secondary).monospacedDigit()
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(.ultraThinMaterial)
-                                        .clipShape(Capsule())
-                                }
-
-                                Spacer()
-
-                                // Seek to cover frame
-                                Button {
-                                    let t = CMTime(seconds: coverTime, preferredTimescale: 600)
-                                    player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
-                                } label: {
-                                    Label("Seek to Cover", systemImage: "camera.viewfinder")
-                                        .font(.system(size: 11))
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .help("Jump playhead to the selected cover frame position")
-                            }
-                            .padding(.horizontal, 28)
-                            .padding(.top, -4)  // tuck closer under the timeline card
-
-                            // Controls
-                            VStack(spacing: 12) {
-                                // Presets
-                                GlassCard {
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        HStack(spacing: 8) {
-                                            Text("Optimized for:")
-                                                .font(.system(size: 12, weight: .medium))
-                                                .foregroundColor(.secondary)
-                                            ForEach(PlatformPreset.allCases) { preset in
-                                                presetButton(preset)
-                                            }
-                                            Spacer()
-                                            savePresetControl
-                                        }
-
-                                        if !presetStore.presets.isEmpty {
-                                            HStack(spacing: 8) {
-                                                Text("My Presets:")
-                                                    .font(.system(size: 11))
-                                                    .foregroundColor(.secondary.opacity(0.7))
-                                                ScrollView(.horizontal, showsIndicators: false) {
-                                                    HStack(spacing: 6) {
-                                                        ForEach(presetStore.presets) { p in
-                                                            customPresetChip(p)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if let note = platformPreset.note {
-                                            HStack(spacing: 6) {
-                                                Image(systemName: "info.circle").font(.caption)
-                                                Text(note).font(.caption)
-                                            }
-                                            .foregroundColor(.secondary)
-                                        }
-                                    }
-                                }
-
-                                // XHS warning
-                                if platformPreset == .xiaohongshu,
-                                   let maxDur = platformPreset.maxDuration,
-                                   (endTime - startTime) > maxDur {
-                                    xhsDurationWarning(maxDur: maxDur)
-                                }
-
-                                // Export settings rows
-                                VStack(spacing: 8) {
-                                    settingsRow(label: "Codec", icon: "video.square") {
-                                        ForEach(ExportCodec.allCases) { c in
-                                            settingButton(c.rawValue, selected: exportSettings.codec == c) {
-                                                exportSettings.codec = c
-                                                if c == .h264 { exportSettings.exportHDR = false }
-                                                markCustom()
-                                            }
-                                        }
-                                        Text(exportSettings.codec.note)
-                                            .font(.caption2).foregroundColor(.secondary)
-                                    }
-
-                                    settingsRow(label: "Resolution", icon: "aspectratio") {
-                                        ForEach(ExportResolution.allCases) { r in
-                                            settingButton(r.rawValue, selected: exportSettings.resolution == r) {
-                                                exportSettings.resolution = r; markCustom()
-                                            }
-                                        }
-                                    }
-
-                                    settingsRow(label: "Quality", icon: "slider.horizontal.3") {
-                                        ForEach(ExportQuality.allCases) { q in
-                                            settingButton(q.rawValue, selected: exportSettings.quality == q) {
-                                                exportSettings.quality = q; markCustom()
-                                            }
-                                        }
-                                        let mbps = exportSettings.quality.approxMbps(
-                                            codec: exportSettings.codec,
-                                            resolution: exportSettings.resolution)
-                                        if !mbps.isEmpty {
-                                            Text(mbps)
-                                                .font(.system(size: 10, weight: .bold))
-                                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                                .background(.white.opacity(0.1))
-                                                .clipShape(Capsule())
-                                        }
-                                    }
-
-                                    settingsRow(label: "Frame Rate", icon: "film.stack") {
-                                        ForEach(ExportFrameRate.allCases) { f in
-                                            settingButton(f.rawValue, selected: exportSettings.frameRate == f) {
-                                                exportSettings.frameRate = f; markCustom()
-                                            }
-                                        }
-                                        Text("※ preserves source fps")
-                                            .font(.caption2).foregroundColor(.secondary.opacity(0.6))
-                                    }
-
-                                    if processor.isHDR {
-                                        settingsRow(label: "HDR", icon: "sun.max.fill") {
-                                            Toggle(isOn: Binding(
-                                                get: { exportSettings.exportHDR },
-                                                set: { v in
-                                                    exportSettings.exportHDR = v
-                                                    if v && exportSettings.codec == .h264 { exportSettings.codec = .hevc }
-                                                    markCustom()
-                                                }
-                                            )) { Text("Export HDR").font(.system(size: 12)) }
-                                            .toggleStyle(.checkbox)
-                                            Text(exportSettings.exportHDR
-                                                 ? "HEVC / H.265 — HLG preserved"
-                                                 : "H.264 — tone-mapped to SDR")
-                                                .font(.caption2).foregroundColor(.secondary)
-                                        }
-                                    }
-                                }
-
-                                // Change video link (loop preview + seek moved to below timeline)
-                                HStack {
-                                    Spacer()
-                                    Button("Change Video") { openVideoFile() }
-                                        .buttonStyle(.link).font(.system(size: 11))
-                                }
-                            }
-                            .padding(.horizontal, 24)
-                            .padding(.bottom, 100) // Space for floating export bar
+                            // Sticky export bar (video always visible on right)
+                            Divider().opacity(0.12)
+                            exportActionsBar
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(.ultraThinMaterial)
+                                .overlay(Rectangle().fill(.white.opacity(0.05)).frame(height: 0.5), alignment: .top)
                         }
-                    }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    // Floating export bar
-                    VStack(spacing: 0) {
-                        Divider().opacity(0.1)
-                        HStack(spacing: 20) {
-                            if processor.isProcessing {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ProgressView(value: processor.progress)
-                                        .progressViewStyle(.linear)
-                                        .frame(width: 140)
-                                    Text(processor.statusMessage)
-                                        .font(.system(size: 10)).foregroundColor(.secondary)
-                                }
-                            } else if !processor.statusMessage.isEmpty {
-                                Text(processor.statusMessage)
-                                    .font(.system(size: 11)).foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            Button(action: exportLivePhoto) {
-                                Label("Create Live Photo", systemImage: "livephoto")
-                                    .frame(width: 148, height: 28)
-                            }
-                            .buttonStyle(.borderedProminent).controlSize(.large)
-                            .disabled(processor.isProcessing)
+                        Divider().opacity(0.2)
 
-                            Button(action: exportAndImportToPhotos) {
-                                Label("Save to Photos", systemImage: "photo.on.rectangle.angled")
-                                    .frame(width: 148, height: 28)
-                            }
-                            .buttonStyle(.bordered).controlSize(.large)
-                            .disabled(processor.isProcessing)
+                        // Right: portrait video fills height
+                        GlassCard(cornerRadius: 16) {
+                            VideoPlayerView(player: player)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
-                        .padding(.horizontal, 32)
-                        .frame(height: 76)
+                        .padding(16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .background(.ultraThinMaterial)
-                    .overlay(Rectangle().fill(.white.opacity(0.05)).frame(height: 0.5), alignment: .top)
+                } else {
+                    // ── Landscape: video top, controls below ────────────────────
+                    ZStack(alignment: .bottom) {
+                        ScrollView {
+                            VStack(spacing: 20) {
+                                GlassCard(cornerRadius: 16) {
+                                    VideoPlayerView(player: player)
+                                        .frame(minHeight: 420, maxHeight: 620)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                }
+                                .padding(.horizontal, 24)
+
+                                timelineSection
+                                    .padding(.horizontal, 24)
+
+                                quickControlsSection
+                                    .padding(.horizontal, 28)
+                                    .padding(.top, -4)
+
+                                exportSettingsPanel
+                                    .padding(.horizontal, 24)
+                                    .padding(.bottom, 100)
+                            }
+                        }
+                        VStack(spacing: 0) {
+                            Divider().opacity(0.1)
+                            exportActionsBar
+                                .padding(.horizontal, 32)
+                                .frame(height: 76)
+                        }
+                        .background(.ultraThinMaterial)
+                        .overlay(Rectangle().fill(.white.opacity(0.05)).frame(height: 0.5), alignment: .top)
+                    }
                 }
             } else {
                 dropZoneView
             }
+        }
+    }
+
+    // ── Shared layout sections (portrait + landscape) ────────────────────────────
+
+    private var timelineSection: some View {
+        GlassCard {
+            TimelineView(
+                duration: processor.duration,
+                coverTime: $coverTime,
+                startTime: $startTime,
+                endTime:   $endTime,
+                thumbnails: thumbnails,
+                coverFramePreview: coverFramePreview
+            )
+            .padding(.top, coverFramePreview != nil ? 90 : 0)
+        }
+        .onChange(of: coverTime) { newTime in updateCoverPreview(at: newTime) }
+    }
+
+    private var quickControlsSection: some View {
+        HStack(spacing: 10) {
+            Toggle(isOn: $isLoopPreview) {
+                Label("Loop Preview", systemImage: "repeat").font(.system(size: 12))
+            }
+            .toggleStyle(.checkbox)
+            .onChange(of: isLoopPreview) { on in if on { startLoopPreview() } else { stopLoopPreview() } }
+            .onChange(of: startTime) { _ in if isLoopPreview { startLoopPreview() } }
+            .onChange(of: endTime)   { _ in if isLoopPreview { startLoopPreview() } }
+            if isLoopPreview {
+                Text("\(formatTime(startTime)) – \(formatTime(endTime))")
+                    .font(.caption).foregroundColor(.secondary).monospacedDigit()
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.ultraThinMaterial).clipShape(Capsule())
+            }
+            Spacer()
+            Button {
+                let t = CMTime(seconds: coverTime, preferredTimescale: 600)
+                self.player?.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+            } label: {
+                Label("Seek to Cover", systemImage: "camera.viewfinder").font(.system(size: 11))
+            }
+            .buttonStyle(.bordered).controlSize(.small)
+            .help("Jump playhead to the selected cover frame position")
+        }
+    }
+
+    private var exportSettingsPanel: some View {
+        VStack(spacing: 12) {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Text("Optimized for:")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                        ForEach(PlatformPreset.allCases) { preset in
+                            presetButton(preset)
+                        }
+                        Spacer()
+                        savePresetControl
+                    }
+                    if !presetStore.presets.isEmpty {
+                        HStack(spacing: 8) {
+                            Text("My Presets:")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary.opacity(0.7))
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(presetStore.presets) { p in customPresetChip(p) }
+                                }
+                            }
+                        }
+                    }
+                    if let note = platformPreset.note {
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle").font(.caption)
+                            Text(note).font(.caption)
+                        }
+                        .foregroundColor(.secondary)
+                    }
+                }
+            }
+            if platformPreset == .xiaohongshu,
+               let maxDur = platformPreset.maxDuration,
+               (endTime - startTime) > maxDur {
+                xhsDurationWarning(maxDur: maxDur)
+            }
+            VStack(spacing: 8) {
+                settingsRow(label: "Codec", icon: "video.square") {
+                    ForEach(ExportCodec.allCases) { c in
+                        settingButton(c.rawValue, selected: exportSettings.codec == c) {
+                            exportSettings.codec = c
+                            if c == .h264 { exportSettings.exportHDR = false }
+                            markCustom()
+                        }
+                    }
+                    Text(exportSettings.codec.note).font(.caption2).foregroundColor(.secondary)
+                }
+                settingsRow(label: "Resolution", icon: "aspectratio") {
+                    ForEach(ExportResolution.allCases) { r in
+                        settingButton(r.rawValue, selected: exportSettings.resolution == r) {
+                            exportSettings.resolution = r; markCustom()
+                        }
+                    }
+                }
+                settingsRow(label: "Quality", icon: "slider.horizontal.3") {
+                    ForEach(ExportQuality.allCases) { q in
+                        settingButton(q.rawValue, selected: exportSettings.quality == q) {
+                            exportSettings.quality = q; markCustom()
+                        }
+                    }
+                    let mbps = exportSettings.quality.approxMbps(
+                        codec: exportSettings.codec, resolution: exportSettings.resolution)
+                    if !mbps.isEmpty {
+                        Text(mbps)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.white.opacity(0.1)).clipShape(Capsule())
+                    }
+                }
+                settingsRow(label: "Frame Rate", icon: "film.stack") {
+                    ForEach(ExportFrameRate.allCases) { f in
+                        settingButton(f.rawValue, selected: exportSettings.frameRate == f) {
+                            exportSettings.frameRate = f; markCustom()
+                        }
+                    }
+                    Text("※ preserves source fps")
+                        .font(.caption2).foregroundColor(.secondary.opacity(0.6))
+                }
+                if processor.isHDR {
+                    settingsRow(label: "HDR", icon: "sun.max.fill") {
+                        Toggle(isOn: Binding(
+                            get: { exportSettings.exportHDR },
+                            set: { v in
+                                exportSettings.exportHDR = v
+                                if v && exportSettings.codec == .h264 { exportSettings.codec = .hevc }
+                                markCustom()
+                            }
+                        )) { Text("Export HDR").font(.system(size: 12)) }
+                        .toggleStyle(.checkbox)
+                        Text(exportSettings.exportHDR
+                             ? "HEVC / H.265 — HLG preserved"
+                             : "H.264 — tone-mapped to SDR")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Change Video") { openVideoFile() }
+                    .buttonStyle(.link).font(.system(size: 11))
+            }
+        }
+    }
+
+    private var exportActionsBar: some View {
+        HStack(spacing: 20) {
+            if processor.isProcessing {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: processor.progress)
+                        .progressViewStyle(.linear).frame(width: 140)
+                    Text(processor.statusMessage)
+                        .font(.system(size: 10)).foregroundColor(.secondary)
+                }
+            } else if !processor.statusMessage.isEmpty {
+                Text(processor.statusMessage)
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+            }
+            Spacer()
+            Button(action: exportLivePhoto) {
+                Label("Create Live Photo", systemImage: "livephoto").frame(width: 148, height: 28)
+            }
+            .buttonStyle(.borderedProminent).controlSize(.large).disabled(processor.isProcessing)
+            Button(action: exportAndImportToPhotos) {
+                Label("Save to Photos", systemImage: "photo.on.rectangle.angled").frame(width: 148, height: 28)
+            }
+            .buttonStyle(.bordered).controlSize(.large).disabled(processor.isProcessing)
         }
     }
 
@@ -672,6 +693,7 @@ struct ContentView: View {
         stopLoopPreview(); isLoopPreview = false; platformPreset = .custom
         exportSettings = ExportSettings(); activeCustomPreset = nil
         videoURL = url; coverFramePreview = nil; coverPreviewTask?.cancel()
+        isPortraitVideo = false   // reset; detect below
         let avAsset = AVAsset(url: url)
         asset = avAsset; player = AVPlayer(url: url); player?.pause()
         Task {
@@ -680,6 +702,14 @@ struct ContentView: View {
             if processor.isHDR { exportSettings.codec = .hevc }
             startTime = 0; endTime = min(processor.duration, 3.0); coverTime = 0
             thumbnails = await ThumbnailGenerator.generateThumbnails(asset: avAsset)
+            // ── Portrait detection ─────────────────────────────────────────
+            if let tracks = try? await avAsset.loadTracks(withMediaType: .video),
+               let track = tracks.first,
+               let naturalSize = try? await track.load(.naturalSize),
+               let transform   = try? await track.load(.preferredTransform) {
+                let t = naturalSize.applying(transform)
+                isPortraitVideo = abs(t.height) > abs(t.width)
+            }
         }
     }
 
