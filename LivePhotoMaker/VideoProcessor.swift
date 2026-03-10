@@ -4,92 +4,116 @@ import CoreVideo
 import AppKit
 import UniformTypeIdentifiers
 
-// ── Platform export presets ────────────────────────────────────────────────────
-/// Platform-specific export presets. Each preset locks codec, resolution, and HDR
-/// to the effective ceiling of the target platform so the output isn't over-encoded.
-enum PlatformPreset: String, CaseIterable, Identifiable, Codable {
-    case custom      = "Custom"
-    case xiaohongshu = "小红书 XHS"
-    case douyin      = "抖音"
+enum ExportCodec: String, CaseIterable, Identifiable, Codable {
+    case h264 = "H.264"
+    case hevc = "H.265 HEVC"
 
     var id: String { rawValue }
 
-    /// Short flag label for the picker button (nil = use rawValue).
+    var note: String {
+        self == .h264
+            ? "Compatible · larger file"
+            : "Smaller file · requires macOS 10.13+"
+    }
+}
+
+enum ExportResolution: String, CaseIterable, Identifiable, Codable {
+    case p720 = "720p"
+    case p1080 = "1080p"
+    case p2160 = "4K"
+    case source = "Source"
+
+    var id: String { rawValue }
+}
+
+enum ExportQuality: String, CaseIterable, Identifiable, Codable {
+    case low = "Low"
+    case high = "High"
+    case source = "Source"
+
+    var id: String { rawValue }
+
+    func approxMbps(codec: ExportCodec, resolution: ExportResolution) -> String {
+        if self == .source { return "original" }
+
+        switch (codec, resolution, self) {
+        case (.h264, .p720, .low): return "~2 Mbps"
+        case (.h264, .p720, .high): return "~6 Mbps"
+        case (.h264, .p1080, .low): return "~5 Mbps"
+        case (.h264, .p1080, .high): return "~16 Mbps"
+        case (.h264, .p2160, _): return "~25 Mbps"
+        case (.hevc, .p720, .low): return "~2 Mbps"
+        case (.hevc, .p720, .high): return "~4 Mbps"
+        case (.hevc, .p1080, .low): return "~3 Mbps"
+        case (.hevc, .p1080, .high): return "~8 Mbps"
+        case (.hevc, .p2160, _): return "~15 Mbps"
+        default: return ""
+        }
+    }
+}
+
+enum ExportFrameRate: String, CaseIterable, Identifiable, Codable {
+    case fps24 = "24"
+    case fps30 = "30"
+    case fps60 = "60"
+    case source = "Source"
+
+    var id: String { rawValue }
+}
+
+struct ExportSettings: Codable, Equatable {
+    var codec: ExportCodec = .h264
+    var resolution: ExportResolution = .source
+    var quality: ExportQuality = .high
+    var frameRate: ExportFrameRate = .source
+    var exportHDR: Bool = false
+}
+
+enum PlatformPreset: String, CaseIterable, Identifiable, Codable {
+    case custom = "Custom"
+    case xiaohongshu = "小红书 XHS"
+    case douyin = "抖音"
+
+    var id: String { rawValue }
+
     var label: String {
+        self == .custom
+            ? "Custom"
+            : self == .xiaohongshu
+                ? "🍠 小红书"
+                : "🎵 抖音"
+    }
+
+    var recommended: ExportSettings {
         switch self {
-        case .custom:      return "Custom"
-        case .xiaohongshu: return "🍠 小红书"
-        case .douyin:      return "🎵 抖音"
+        case .custom:
+            return ExportSettings()
+        case .xiaohongshu:
+            return ExportSettings(codec: .h264, resolution: .p720, quality: .low, frameRate: .source, exportHDR: false)
+        case .douyin:
+            return ExportSettings(codec: .h264, resolution: .p1080, quality: .low, frameRate: .source, exportHDR: false)
         }
     }
 
-    /// Informational footnote shown beneath the controls.
     var note: String? {
         switch self {
         case .xiaohongshu:
-            return "H.264 · 720p · 4 Mbps · SDR — XHS re-encodes to ≤4 Mbps; 建议时长 ≤2.8s"
+            return "推荐值：H.264 · 720p · Low · SDR。可自行调整后保存为 Custom Preset"
         case .douyin:
-            return "H.264 · 1080p · 5 Mbps · SDR — ⚠️ 抖音图片帖不支持 Live Photo 动效，仅封面展示"
+            return "推荐值：H.264 · 1080p · Low · SDR。⚠️ 抖音图片帖不支持 Live Photo 动效"
         case .custom:
             return nil
         }
     }
 
-    /// Recommended maximum clip duration (seconds). nil = no restriction.
     var maxDuration: Double? {
-        switch self {
-        case .xiaohongshu: return 2.8
-        default: return nil
-        }
-    }
-
-    /// When true the HDR toggle is force-disabled.
-    var forcesSDR: Bool { self != .custom }
-
-    /// BitratePreset to apply when this platform is selected.
-    var bitratePreset: BitratePreset {
-        switch self {
-        case .xiaohongshu: return .xhs720p
-        case .douyin:      return .douyin1080p
-        case .custom:      return .medium
-        }
-    }
-}
-
-// ── Bitrate presets ────────────────────────────────────────────────────────────
-enum BitratePreset: String, CaseIterable, Identifiable, Codable {
-    // Platform-specific (only set via PlatformPreset; hidden from normal picker)
-    case xhs720p    = "XHS 720p (4 Mbps)"
-    case douyin1080p = "Douyin 1080p (5 Mbps)"
-    // User-selectable
-    case low     = "Low (8 Mbps)"
-    case medium  = "Medium (16 Mbps)"
-    case high    = "High (32 Mbps)"
-    case original = "Original"
-
-    var id: String { rawValue }
-
-    /// Cases shown in the normal bitrate picker (platform cases hidden).
-    static var displayCases: [BitratePreset] { [.low, .medium, .high, .original] }
-
-    var bitsPerSecond: Int? {
-        switch self {
-        case .xhs720p:    return 4_000_000
-        case .douyin1080p: return 5_000_000
-        case .low:        return 8_000_000
-        case .medium:     return 16_000_000
-        case .high:       return 32_000_000
-        case .original:   return nil
-        }
+        self == .xiaohongshu ? 2.8 : nil
     }
 }
 
 @MainActor
 class VideoProcessor: ObservableObject {
     @Published var isHDR = false
-    /// Whether to preserve HDR when exporting. Only shown when isHDR == true.
-    /// When false, the export pipeline tone-maps to SDR (H.264).
-    @Published var exportHDR = true
     @Published var duration: Double = 0
     @Published var progress: Double = 0
     @Published var statusMessage = ""
@@ -104,7 +128,6 @@ class VideoProcessor: ObservableObject {
             self.duration = CMTimeGetSeconds(dur)
             let detected = await detectHDR(asset: asset)
             self.isHDR = detected
-            self.exportHDR = detected   // default ON when HDR source
         } catch {
             statusMessage = "Failed to load video: \(error.localizedDescription)"
         }
@@ -121,7 +144,7 @@ class VideoProcessor: ObservableObject {
                 if let extensions = CMFormatDescriptionGetExtensions(formatDesc) as? [String: Any] {
                     if let tf = extensions[kCVImageBufferTransferFunctionKey as String] as? String {
                         let hlg = kCVImageBufferTransferFunction_ITU_R_2100_HLG as String
-                        let pq  = kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ as String
+                        let pq = kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ as String
                         if tf == hlg || tf == pq {
                             hdrTransferFunction = tf as CFString
                             return true
@@ -140,9 +163,6 @@ class VideoProcessor: ObservableObject {
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
-        // Request HDR/wide-color output — keeps HLG/PQ color space in the returned CGImage.
-        // Default is ForceSDR (tone-maps to 8-bit sRGB); MatchSource preserves HLG/PQ.
-        // Available macOS 15+; on older versions we get a tone-mapped frame (graceful degradation).
         if #available(macOS 15.0, *) {
             generator.dynamicRangePolicy = .matchSource
         }
@@ -169,7 +189,7 @@ class VideoProcessor: ObservableObject {
         asset: AVAsset,
         startTime: CMTime,
         endTime: CMTime,
-        bitratePreset: BitratePreset
+        settings: ExportSettings
     ) async throws -> URL {
         isProcessing = true
         progress = 0
@@ -179,7 +199,7 @@ class VideoProcessor: ObservableObject {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mov")
 
-        let presetName = resolveExportPreset(bitratePreset: bitratePreset)
+        let presetName = resolveAVPreset(settings: settings)
 
         try await exportWithExportSession(
             asset: asset,
@@ -195,44 +215,28 @@ class VideoProcessor: ObservableObject {
         return outputURL
     }
 
-    /// Resolve AVAssetExportSession preset string from BitratePreset + HDR flag.
-    ///
-    /// Platform presets (.xhs720p / .douyin1080p):
-    ///   Always H.264 (SDR) at a capped resolution — matching each platform's effective ceiling.
-    ///   XHS re-encodes uploads to ≤720p/4 Mbps; Douyin tops out at 1080p/~5 Mbps.
-    ///
-    /// HDR path  → HEVC, preserving HLG/PQ transfer function + bt2020 primaries.
-    /// SDR path  → H.264, tonemap HDR→SDR automatically.
-    /// Original  → Passthrough (no re-encode).
-    private func resolveExportPreset(bitratePreset: BitratePreset) -> String {
-        switch bitratePreset {
-        case .original:
+    private func resolveAVPreset(settings: ExportSettings) -> String {
+        if settings.quality == .source || settings.resolution == .source {
             return AVAssetExportPresetPassthrough
+        }
 
-        // ── Platform-specific ──────────────────────────────────────────────────
-        case .xhs720p:
-            // H.264 720p — XHS displays ≤720p for Live Photo MOV component; cap input here
+        let hdr = isHDR && settings.exportHDR
+
+        switch (settings.codec, settings.resolution) {
+        case (.hevc, .p1080):
+            return hdr ? AVAssetExportPresetHEVC1920x1080 : AVAssetExportPreset1920x1080
+        case (.hevc, .p2160):
+            return hdr ? AVAssetExportPresetHEVC3840x2160 : AVAssetExportPreset3840x2160
+        case (.hevc, .p720):
             return AVAssetExportPreset1280x720
-
-        case .douyin1080p:
-            // H.264 1080p — Douyin's quality ceiling for video
-            return AVAssetExportPreset1920x1080
-
-        // ── Standard ──────────────────────────────────────────────────────────
-        case .low:
-            return isHDR && exportHDR
-                ? AVAssetExportPresetHEVC1920x1080
-                : AVAssetExportPresetMediumQuality
-
-        case .medium:
-            return isHDR && exportHDR
-                ? AVAssetExportPresetHEVCHighestQuality
-                : AVAssetExportPresetHighestQuality
-
-        case .high:
-            return isHDR && exportHDR
-                ? AVAssetExportPresetHEVCHighestQuality
-                : AVAssetExportPresetHighestQuality
+        case (.h264, .p720):
+            return AVAssetExportPreset1280x720
+        case (.h264, .p1080):
+            return settings.quality == .low ? AVAssetExportPreset1920x1080 : AVAssetExportPresetHighestQuality
+        case (.h264, .p2160):
+            return AVAssetExportPreset3840x2160
+        default:
+            return AVAssetExportPresetHighestQuality
         }
     }
 

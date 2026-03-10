@@ -26,7 +26,7 @@ struct ContentView: View {
     @State private var coverTime: Double = 0
     @State private var startTime: Double = 0
     @State private var endTime: Double = 0
-    @State private var bitratePreset: BitratePreset = .medium
+    @State private var exportSettings = ExportSettings()
     @State private var platformPreset: PlatformPreset = .custom
 
     // ── Custom preset store ──────────────────────────────────────────────────
@@ -206,7 +206,6 @@ struct ContentView: View {
                                 ForEach(PlatformPreset.allCases) { preset in
                                     Button(preset.label) {
                                         applyPlatformPreset(preset)
-                                        activeCustomPreset = nil
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
@@ -249,7 +248,7 @@ struct ContentView: View {
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
-                                    .help("Save current bitrate, HDR, and platform settings as a named preset")
+                                    .help("Save current export settings as a named preset")
                                 }
                             }
 
@@ -296,7 +295,7 @@ struct ContentView: View {
                                 }
                             }
 
-                            // Platform note + XHS duration warning
+                            // Platform note
                             if let note = platformPreset.note {
                                 HStack(spacing: 6) {
                                     Image(systemName: "info.circle")
@@ -334,51 +333,86 @@ struct ContentView: View {
                                     .fill(Color.orange.opacity(0.08)))
                             }
 
-                            // ── Bitrate selector ──────────────────────────────
-                            HStack {
-                                Text("Bitrate:")
-                                    .font(.subheadline)
-                                Picker("", selection: $bitratePreset) {
-                                    ForEach(BitratePreset.displayCases) { preset in
-                                        Text(preset.rawValue).tag(preset)
+                            // ── Codec ─────────────────────────────────────────
+                            settingsRow(label: "Codec") {
+                                ForEach(ExportCodec.allCases) { c in
+                                    settingButton(c.rawValue, selected: exportSettings.codec == c) {
+                                        exportSettings.codec = c
+                                        if c == .h264 { exportSettings.exportHDR = false }
+                                        platformPreset = .custom; activeCustomPreset = nil
                                     }
                                 }
-                                .pickerStyle(.segmented)
-                                .frame(maxWidth: 500)
-                                .disabled(platformPreset != .custom)
-                                .opacity(platformPreset != .custom ? 0.5 : 1.0)
+                                Text(exportSettings.codec.note)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
 
-                                // Show locked label when platform preset overrides bitrate
-                                if platformPreset != .custom {
-                                    Text(platformPreset.bitratePreset.rawValue)
+                            // ── Resolution ────────────────────────────────────
+                            settingsRow(label: "Resolution") {
+                                ForEach(ExportResolution.allCases) { r in
+                                    settingButton(r.rawValue, selected: exportSettings.resolution == r) {
+                                        exportSettings.resolution = r
+                                        platformPreset = .custom; activeCustomPreset = nil
+                                    }
+                                }
+                            }
+
+                            // ── Quality ───────────────────────────────────────
+                            settingsRow(label: "Quality") {
+                                ForEach(ExportQuality.allCases) { q in
+                                    settingButton(q.rawValue, selected: exportSettings.quality == q) {
+                                        exportSettings.quality = q
+                                        platformPreset = .custom; activeCustomPreset = nil
+                                    }
+                                }
+                                let mbps = exportSettings.quality.approxMbps(
+                                    codec: exportSettings.codec,
+                                    resolution: exportSettings.resolution
+                                )
+                                if !mbps.isEmpty {
+                                    Text(mbps)
                                         .font(.caption)
                                         .foregroundColor(.secondary)
-                                        .padding(.horizontal, 8).padding(.vertical, 3)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
                                         .background(Capsule().fill(Color.secondary.opacity(0.1)))
                                 }
                             }
 
-                            // HDR export toggle — only shown for HDR source videos
+                            // ── Frame Rate ────────────────────────────────────
+                            settingsRow(label: "Frame Rate") {
+                                ForEach(ExportFrameRate.allCases) { f in
+                                    settingButton(f.rawValue, selected: exportSettings.frameRate == f) {
+                                        exportSettings.frameRate = f
+                                        platformPreset = .custom; activeCustomPreset = nil
+                                    }
+                                }
+                                Text("AVAssetExportSession preserves source fps; selection is informational")
+                                    .font(.caption2)
+                                    .foregroundColor(Color.secondary.opacity(0.6))
+                            }
+
+                            // ── HDR (only if source is HDR) ───────────────────
                             if processor.isHDR {
-                                HStack(spacing: 8) {
-                                    Toggle(isOn: $processor.exportHDR) {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "sparkles.tv")
-                                                .foregroundColor(.purple)
-                                            Text("Export HDR")
-                                                .font(.subheadline)
+                                settingsRow(label: "HDR") {
+                                    Toggle(isOn: Binding(
+                                        get: { exportSettings.exportHDR },
+                                        set: { v in
+                                            exportSettings.exportHDR = v
+                                            if v && exportSettings.codec == .h264 {
+                                                exportSettings.codec = .hevc
+                                            }
+                                            platformPreset = .custom; activeCustomPreset = nil
                                         }
+                                    )) {
+                                        Text("Export HDR")
                                     }
                                     .toggleStyle(.checkbox)
-                                    .disabled(platformPreset.forcesSDR)
-
-                                    Text(processor.exportHDR && !platformPreset.forcesSDR
+                                    Text(exportSettings.exportHDR
                                          ? "HEVC / H.265 — HLG color space preserved"
                                          : "H.264 — tone-mapped to SDR")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
-
-                                    Spacer()
                                 }
                             }
 
@@ -472,6 +506,30 @@ struct ContentView: View {
         }
     }   // end mainEditingArea
 
+    // ── Reusable settings row ──────────────────────────────────────────────────
+    @ViewBuilder
+    private func settingsRow<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 10) {
+            Text(label + ":")
+                .font(.subheadline)
+                .frame(width: 85, alignment: .trailing)
+                .foregroundColor(.secondary)
+            content()
+            Spacer()
+        }
+    }
+
+    private func settingButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(selected ? .accentColor : .secondary)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(selected ? Color.accentColor.opacity(0.12) : Color.clear)
+            )
+    }
+
     private var dropZoneView: some View {
         VStack(spacing: 20) {
             Spacer()
@@ -514,7 +572,7 @@ struct ContentView: View {
             UTType.movie, UTType.mpeg4Movie, UTType.quickTimeMovie,
             UTType(filenameExtension: "m4v") ?? .movie,
         ]
-        panel.allowsMultipleSelection = true   // ← allows batch import
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
 
         if panel.runModal() == .OK {
@@ -539,7 +597,6 @@ struct ContentView: View {
 
     // ── File queue management ──────────────────────────────────────────────────
 
-    /// Add a URL to the queue (deduplicates) and switch to it.
     private func addToQueue(_ url: URL) {
         if let existing = fileQueue.firstIndex(where: { $0.url == url }) {
             switchToFile(at: existing); return
@@ -548,7 +605,6 @@ struct ContentView: View {
         switchToFile(at: fileQueue.count - 1)
     }
 
-    /// Switch the editor to an already-queued file.
     private func switchToFile(at index: Int) {
         guard index >= 0, index < fileQueue.count else { return }
         currentQueueIndex = index
@@ -560,9 +616,9 @@ struct ContentView: View {
     private func applyPlatformPreset(_ preset: PlatformPreset) {
         platformPreset = preset
         if preset != .custom {
-            bitratePreset = preset.bitratePreset
-            if preset.forcesSDR { processor.exportHDR = false }
+            exportSettings = preset.recommended
         }
+        activeCustomPreset = nil
     }
 
     // ── Custom preset save / load ──────────────────────────────────────────────
@@ -570,16 +626,7 @@ struct ContentView: View {
     private func commitSavePreset() {
         let name = newPresetName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
-        // Capture the effective bitrate (platform preset may have locked it)
-        let effectiveBitrate = platformPreset != .custom
-            ? platformPreset.bitratePreset
-            : bitratePreset
-        let p = SavedPreset(
-            name:           name,
-            platformPreset: platformPreset,
-            bitratePreset:  effectiveBitrate,
-            exportHDR:      processor.exportHDR
-        )
+        let p = SavedPreset(name: name, settings: exportSettings, platform: platformPreset)
         presetStore.add(p)
         activeCustomPreset = p
         newPresetName = ""
@@ -588,29 +635,23 @@ struct ContentView: View {
 
     private func applyCustomPreset(_ preset: SavedPreset) {
         activeCustomPreset = preset
-        // Apply platform first (locks bitrate + SDR if needed)
-        applyPlatformPreset(preset.platformPreset)
-        // Then override bitrate and HDR from saved values
-        bitratePreset = preset.bitratePreset
-        processor.exportHDR = preset.exportHDR
+        platformPreset = preset.platform
+        exportSettings = preset.settings
     }
 
     // ── Loop preview ───────────────────────────────────────────────────────────
 
     private func startLoopPreview() {
         guard let player = player else { return }
-        // Remove any existing observer first
         if let obs = loopObserver { player.removeTimeObserver(obs); loopObserver = nil }
 
         let startCM = CMTime(seconds: startTime, preferredTimescale: 600)
         let endCM   = CMTime(seconds: max(endTime, startTime + 0.05), preferredTimescale: 600)
 
-        // Seek to start and begin playing
         player.seek(to: startCM, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
             player.play()
         }
 
-        // Fire when playback crosses endTime → seek back to startTime
         let capturedStart = startTime
         loopObserver = player.addBoundaryTimeObserver(
             forTimes: [NSValue(time: endCM)],
@@ -639,7 +680,10 @@ struct ContentView: View {
     private func loadVideoContent(url: URL) {
         stopLoopPreview()
         isLoopPreview = false
+        exportSettings = ExportSettings()
+        exportSettings.exportHDR = false
         platformPreset = .custom
+        activeCustomPreset = nil
         videoURL = url
         coverFramePreview = nil
         coverPreviewTask?.cancel()
@@ -650,6 +694,7 @@ struct ContentView: View {
 
         Task {
             _ = await processor.loadAsset(url: url)
+            exportSettings.exportHDR = processor.isHDR
             let totalDuration = processor.duration
             startTime = 0
             endTime = min(totalDuration, 3.0)
@@ -679,22 +724,12 @@ struct ContentView: View {
                     asset: asset,
                     startTime: startCMTime,
                     endTime: endCMTime,
-                    bitratePreset: bitratePreset
+                    settings: exportSettings
                 )
 
                 processor.statusMessage = "Creating Live Photo pair..."
                 processor.progress = 0.9
 
-                // Let the user choose where to save
-                let savePanel = NSSavePanel()
-                savePanel.title = "Save Live Photo"
-                savePanel.message = "Choose a folder to save the Live Photo files"
-                savePanel.nameFieldStringValue = "LivePhoto"
-                savePanel.canCreateDirectories = true
-                // Save as a folder
-                savePanel.allowedContentTypes = [.folder]
-
-                // Actually use a directory picker instead
                 let openPanel = NSOpenPanel()
                 openPanel.title = "Choose Save Location"
                 openPanel.message = "Select a folder to save the Live Photo files"
@@ -715,14 +750,12 @@ struct ContentView: View {
                     outputDirectory: saveDir
                 )
 
-                // Clean up temp video
                 try? FileManager.default.removeItem(at: exportedVideoURL)
 
                 processor.isProcessing = false
                 processor.progress = 1.0
                 processor.statusMessage = "Live Photo saved! Image: \(result.imageURL.lastPathComponent), Video: \(result.videoURL.lastPathComponent)"
 
-                // Reveal in Finder
                 NSWorkspace.shared.selectFile(result.imageURL.path, inFileViewerRootedAtPath: saveDir.path)
 
             } catch {
@@ -755,7 +788,7 @@ struct ContentView: View {
                     asset: asset,
                     startTime: startCMTime,
                     endTime: endCMTime,
-                    bitratePreset: bitratePreset
+                    settings: exportSettings
                 )
 
                 processor.statusMessage = "Creating Live Photo pair..."
@@ -777,7 +810,6 @@ struct ContentView: View {
 
                 try await creator.importToPhotos(imageURL: result.imageURL, videoURL: result.videoURL)
 
-                // Clean up temp files
                 try? FileManager.default.removeItem(at: tempDir)
                 try? FileManager.default.removeItem(at: exportedVideoURL)
 
