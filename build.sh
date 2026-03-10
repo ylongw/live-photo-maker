@@ -24,6 +24,7 @@ swiftc \
   -framework AppKit \
   -framework UniformTypeIdentifiers \
   LivePhotoMaker/LivePhotoMakerApp.swift \
+  LivePhotoMaker/L10n.swift \
   LivePhotoMaker/ContentView.swift \
   LivePhotoMaker/VideoProcessor.swift \
   LivePhotoMaker/LivePhotoCreator.swift \
