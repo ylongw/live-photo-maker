@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 // ── Platform export presets ────────────────────────────────────────────────────
 /// Platform-specific export presets. Each preset locks codec, resolution, and HDR
 /// to the effective ceiling of the target platform so the output isn't over-encoded.
-enum PlatformPreset: String, CaseIterable, Identifiable {
+enum PlatformPreset: String, CaseIterable, Identifiable, Codable {
     case custom      = "Custom"
     case xiaohongshu = "小红书 XHS"
     case douyin      = "抖音"
@@ -57,7 +57,7 @@ enum PlatformPreset: String, CaseIterable, Identifiable {
 }
 
 // ── Bitrate presets ────────────────────────────────────────────────────────────
-enum BitratePreset: String, CaseIterable, Identifiable {
+enum BitratePreset: String, CaseIterable, Identifiable, Codable {
     // Platform-specific (only set via PlatformPreset; hidden from normal picker)
     case xhs720p    = "XHS 720p (4 Mbps)"
     case douyin1080p = "Douyin 1080p (5 Mbps)"

@@ -28,6 +28,12 @@ struct ContentView: View {
     @State private var endTime: Double = 0
     @State private var bitratePreset: BitratePreset = .medium
     @State private var platformPreset: PlatformPreset = .custom
+
+    // ── Custom preset store ──────────────────────────────────────────────────
+    @StateObject private var presetStore = PresetStore()
+    @State private var activeCustomPreset: SavedPreset? = nil
+    @State private var showingSaveField = false
+    @State private var newPresetName = ""
     @State private var thumbnails: [NSImage] = []
 
     @State private var isDragOver = false
@@ -193,25 +199,101 @@ struct ContentView: View {
                         // Controls
                         VStack(spacing: 12) {
 
-                            // ── Platform preset picker ─────────────────────────
+                            // ── Platform preset picker + save ─────────────────
                             HStack(spacing: 8) {
                                 Text("Optimized for:")
                                     .font(.subheadline)
                                 ForEach(PlatformPreset.allCases) { preset in
                                     Button(preset.label) {
                                         applyPlatformPreset(preset)
+                                        activeCustomPreset = nil
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
-                                    .tint(platformPreset == preset ? .accentColor : .secondary)
+                                    .tint(platformPreset == preset && activeCustomPreset == nil
+                                          ? .accentColor : .secondary)
                                     .background(
                                         RoundedRectangle(cornerRadius: 6)
-                                            .fill(platformPreset == preset
+                                            .fill(platformPreset == preset && activeCustomPreset == nil
                                                   ? Color.accentColor.opacity(0.12)
                                                   : Color.clear)
                                     )
                                 }
                                 Spacer()
+
+                                // Save current settings as named preset
+                                if showingSaveField {
+                                    HStack(spacing: 4) {
+                                        TextField("Preset name…", text: $newPresetName)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 150)
+                                            .onSubmit { commitSavePreset() }
+                                        Button("Save") { commitSavePreset() }
+                                            .buttonStyle(.borderedProminent)
+                                            .controlSize(.small)
+                                            .disabled(newPresetName.trimmingCharacters(in: .whitespaces).isEmpty)
+                                        Button("Cancel") {
+                                            showingSaveField = false
+                                            newPresetName = ""
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .controlSize(.small)
+                                        .foregroundColor(.secondary)
+                                    }
+                                } else {
+                                    Button {
+                                        showingSaveField = true
+                                    } label: {
+                                        Label("Save Preset", systemImage: "square.and.arrow.down")
+                                            .font(.caption)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .help("Save current bitrate, HDR, and platform settings as a named preset")
+                                }
+                            }
+
+                            // ── My presets row (visible only when presets exist) ──
+                            if !presetStore.presets.isEmpty {
+                                HStack(spacing: 6) {
+                                    Text("My Presets:")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 5) {
+                                            ForEach(presetStore.presets) { preset in
+                                                HStack(spacing: 2) {
+                                                    Button(preset.name) {
+                                                        applyCustomPreset(preset)
+                                                    }
+                                                    .buttonStyle(.bordered)
+                                                    .controlSize(.small)
+                                                    .tint(activeCustomPreset?.id == preset.id ? .accentColor : .secondary)
+                                                    .background(
+                                                        RoundedRectangle(cornerRadius: 6)
+                                                            .fill(activeCustomPreset?.id == preset.id
+                                                                  ? Color.accentColor.opacity(0.12)
+                                                                  : Color.clear)
+                                                    )
+                                                    .help(preset.summary)
+
+                                                    Button {
+                                                        presetStore.delete(preset)
+                                                        if activeCustomPreset?.id == preset.id {
+                                                            activeCustomPreset = nil
+                                                        }
+                                                    } label: {
+                                                        Image(systemName: "xmark")
+                                                            .font(.system(size: 8, weight: .bold))
+                                                    }
+                                                    .buttonStyle(.borderless)
+                                                    .foregroundColor(.secondary)
+                                                    .help("Delete \"\(preset.name)\"")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
 
                             // Platform note + XHS duration warning
@@ -481,6 +563,36 @@ struct ContentView: View {
             bitratePreset = preset.bitratePreset
             if preset.forcesSDR { processor.exportHDR = false }
         }
+    }
+
+    // ── Custom preset save / load ──────────────────────────────────────────────
+
+    private func commitSavePreset() {
+        let name = newPresetName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        // Capture the effective bitrate (platform preset may have locked it)
+        let effectiveBitrate = platformPreset != .custom
+            ? platformPreset.bitratePreset
+            : bitratePreset
+        let p = SavedPreset(
+            name:           name,
+            platformPreset: platformPreset,
+            bitratePreset:  effectiveBitrate,
+            exportHDR:      processor.exportHDR
+        )
+        presetStore.add(p)
+        activeCustomPreset = p
+        newPresetName = ""
+        showingSaveField = false
+    }
+
+    private func applyCustomPreset(_ preset: SavedPreset) {
+        activeCustomPreset = preset
+        // Apply platform first (locks bitrate + SDR if needed)
+        applyPlatformPreset(preset.platformPreset)
+        // Then override bitrate and HDR from saved values
+        bitratePreset = preset.bitratePreset
+        processor.exportHDR = preset.exportHDR
     }
 
     // ── Loop preview ───────────────────────────────────────────────────────────
