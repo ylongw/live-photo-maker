@@ -212,6 +212,45 @@ struct ContentView: View {
                                 updateCoverPreview(at: newTime)
                             }
 
+                            // Quick controls — directly below timeline
+                            HStack(spacing: 10) {
+                                // Loop preview toggle
+                                Toggle(isOn: $isLoopPreview) {
+                                    Label("Loop Preview", systemImage: "repeat")
+                                        .font(.system(size: 12))
+                                }
+                                .toggleStyle(.checkbox)
+                                .onChange(of: isLoopPreview) { on in
+                                    if on { startLoopPreview() } else { stopLoopPreview() }
+                                }
+                                .onChange(of: startTime) { _ in if isLoopPreview { startLoopPreview() } }
+                                .onChange(of: endTime)   { _ in if isLoopPreview { startLoopPreview() } }
+
+                                if isLoopPreview {
+                                    Text("\(formatTime(startTime)) – \(formatTime(endTime))")
+                                        .font(.caption).foregroundColor(.secondary).monospacedDigit()
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(.ultraThinMaterial)
+                                        .clipShape(Capsule())
+                                }
+
+                                Spacer()
+
+                                // Seek to cover frame
+                                Button {
+                                    let t = CMTime(seconds: coverTime, preferredTimescale: 600)
+                                    player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+                                } label: {
+                                    Label("Seek to Cover", systemImage: "camera.viewfinder")
+                                        .font(.system(size: 11))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .help("Jump playhead to the selected cover frame position")
+                            }
+                            .padding(.horizontal, 28)
+                            .padding(.top, -4)  // tuck closer under the timeline card
+
                             // Controls
                             VStack(spacing: 12) {
                                 // Presets
@@ -329,33 +368,12 @@ struct ContentView: View {
                                     }
                                 }
 
-                                // Loop + seek utils
-                                HStack(spacing: 16) {
-                                    Toggle(isOn: $isLoopPreview) {
-                                        Label("Loop Preview", systemImage: "repeat")
-                                            .font(.system(size: 12))
-                                    }
-                                    .toggleStyle(.checkbox)
-                                    .onChange(of: isLoopPreview) { on in
-                                        if on { startLoopPreview() } else { stopLoopPreview() }
-                                    }
-                                    .onChange(of: startTime) { _ in if isLoopPreview { startLoopPreview() } }
-                                    .onChange(of: endTime)   { _ in if isLoopPreview { startLoopPreview() } }
-
-                                    if isLoopPreview {
-                                        Text("\(formatTime(startTime)) – \(formatTime(endTime))")
-                                            .font(.caption).foregroundColor(.secondary).monospacedDigit()
-                                    }
-
+                                // Change video link (loop preview + seek moved to below timeline)
+                                HStack {
                                     Spacer()
-                                    Button("Seek to Cover") {
-                                        let t = CMTime(seconds: coverTime, preferredTimescale: 600)
-                                        player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
-                                    }.buttonStyle(.link).font(.system(size: 11))
                                     Button("Change Video") { openVideoFile() }
                                         .buttonStyle(.link).font(.system(size: 11))
                                 }
-                                .padding(.top, 4)
                             }
                             .padding(.horizontal, 24)
                             .padding(.bottom, 100) // Space for floating export bar
