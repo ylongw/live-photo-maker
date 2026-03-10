@@ -410,6 +410,16 @@ struct ContentView: View {
                             .font(.caption2).foregroundColor(.secondary)
                     }
                 }
+
+                settingsRow(label: "Audio", icon: "speaker.wave.2") {
+                    Toggle(isOn: Binding(
+                        get: { exportSettings.muteAudio },
+                        set: { v in exportSettings.muteAudio = v; markCustom() }
+                    )) { Text("Mute").font(.system(size: 12)) }
+                    .toggleStyle(.checkbox)
+                    Text(exportSettings.muteAudio ? "No audio in exported Live Photo" : "Keep original audio")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
             }
             HStack {
                 Spacer()

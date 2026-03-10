@@ -67,6 +67,7 @@ struct ExportSettings: Codable, Equatable {
     var quality: ExportQuality = .high
     var frameRate: ExportFrameRate = .source
     var exportHDR: Bool = false
+    var muteAudio: Bool = false
 }
 
 enum PlatformPreset: String, CaseIterable, Identifiable, Codable {
@@ -215,7 +216,8 @@ class VideoProcessor: ObservableObject {
             startTime: startTime,
             endTime: endTime,
             presetName: presetName,
-            outputURL: outputURL
+            outputURL: outputURL,
+            muteAudio: settings.muteAudio
         )
 
         isProcessing = false
@@ -254,7 +256,8 @@ class VideoProcessor: ObservableObject {
         startTime: CMTime,
         endTime: CMTime,
         presetName: String,
-        outputURL: URL
+        outputURL: URL,
+        muteAudio: Bool = false
     ) async throws {
         guard let session = AVAssetExportSession(asset: asset, presetName: presetName) else {
             throw LivePhotoError.exportSessionCreationFailed
@@ -264,6 +267,22 @@ class VideoProcessor: ObservableObject {
         session.outputFileType = .mov
         session.shouldOptimizeForNetworkUse = false
         session.timeRange = CMTimeRange(start: startTime, end: endTime)
+
+        // Mute audio: set all audio track volumes to 0 via AVAudioMix.
+        // The audio track is still present but silent (no re-encode needed).
+        if muteAudio {
+            let audioTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
+            if !audioTracks.isEmpty {
+                let params: [AVMutableAudioMixInputParameters] = audioTracks.map { track in
+                    let p = AVMutableAudioMixInputParameters(track: track)
+                    p.setVolume(0, at: .zero)
+                    return p
+                }
+                let mix = AVMutableAudioMix()
+                mix.inputParameters = params
+                session.audioMix = mix
+            }
+        }
 
         let progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             Task { @MainActor [weak self] in
