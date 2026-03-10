@@ -92,6 +92,8 @@ struct ContentView: View {
     @State private var loopObserver:   Any? = nil
     @State private var isPortraitVideo = false   // auto-detected on video load
 
+    @StateObject private var l10n = L10n.shared
+
     var body: some View {
         ZStack {
             // Window-level blur background
@@ -112,13 +114,14 @@ struct ContentView: View {
                minHeight: 700)
         .alert("Error", isPresented: $showError) { Button("OK") {} } message: { Text(errorMessage) }
         .onDrop(of: [.fileURL], isTargeted: $isDragOver) { handleDrop(providers: $0) }
+        .environmentObject(l10n)
     }
 
     // ── Sidebar ───────────────────────────────────────────────────────────────
     private var fileSidebarView: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("FILES")
+                Text(l10n.filesHeader)
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(.secondary)
                 Spacer()
@@ -126,7 +129,7 @@ struct ContentView: View {
                     Image(systemName: "plus.circle.fill")
                         .symbolRenderingMode(.hierarchical)
                         .font(.system(size: 14))
-                }.buttonStyle(.plain).help("Add more videos")
+                }.buttonStyle(.plain).help(l10n.addVideos)
             }
             .padding(.horizontal, 16).padding(.top, 20).padding(.bottom, 12)
 
@@ -177,13 +180,25 @@ struct ContentView: View {
                 }
                 Spacer()
                 if processor.isHDR {
-                    Label("HDR", systemImage: "sparkles.tv")
+                    Label(l10n.hdrBadge, systemImage: "sparkles.tv")
                         .font(.system(size: 10, weight: .bold))
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(Color.purple.opacity(0.2))
                         .foregroundColor(.purple)
                         .clipShape(Capsule())
                 }
+                // Language toggle
+                Button { l10n.toggleLanguage() } label: {
+                    Text(l10n.langToggleLabel)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .frame(width: 26, height: 20)
+                        .padding(.horizontal, 4)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.1), lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+                .help(l10n.langToggleTooltip)
             }
             .padding(.horizontal, 24).padding(.vertical, 16)
 
@@ -287,7 +302,7 @@ struct ContentView: View {
     private var quickControlsSection: some View {
         HStack(spacing: 10) {
             Toggle(isOn: $isLoopPreview) {
-                Label("Loop Preview", systemImage: "repeat").font(.system(size: 12))
+                Label(l10n.loopPreview, systemImage: "repeat").font(.system(size: 12))
             }
             .toggleStyle(.checkbox)
             .onChange(of: isLoopPreview) { on in if on { startLoopPreview() } else { stopLoopPreview() } }
@@ -304,10 +319,10 @@ struct ContentView: View {
                 let t = CMTime(seconds: coverTime, preferredTimescale: 600)
                 self.player?.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
             } label: {
-                Label("Seek to Cover", systemImage: "camera.viewfinder").font(.system(size: 11))
+                Label(l10n.seekToCover, systemImage: "camera.viewfinder").font(.system(size: 11))
             }
             .buttonStyle(.bordered).controlSize(.small)
-            .help("Jump playhead to the selected cover frame position")
+            .help(l10n.seekTooltip)
         }
     }
 
@@ -352,7 +367,7 @@ struct ContentView: View {
                 xhsDurationWarning(maxDur: maxDur)
             }
             VStack(spacing: 8) {
-                settingsRow(label: "Codec", icon: "video.square") {
+                settingsRow(label: l10n.codecLabel, icon: "video.square") {
                     ForEach(ExportCodec.allCases) { c in
                         settingButton(c.rawValue, selected: exportSettings.codec == c) {
                             exportSettings.codec = c
@@ -362,14 +377,14 @@ struct ContentView: View {
                     }
                     Text(exportSettings.codec.note).font(.caption2).foregroundColor(.secondary)
                 }
-                settingsRow(label: "Resolution", icon: "aspectratio") {
+                settingsRow(label: l10n.resolutionLabel, icon: "aspectratio") {
                     ForEach(ExportResolution.allCases) { r in
                         settingButton(r.rawValue, selected: exportSettings.resolution == r) {
                             exportSettings.resolution = r; markCustom()
                         }
                     }
                 }
-                settingsRow(label: "Quality", icon: "slider.horizontal.3") {
+                settingsRow(label: l10n.qualityLabel, icon: "slider.horizontal.3") {
                     ForEach(ExportQuality.allCases) { q in
                         settingButton(q.rawValue, selected: exportSettings.quality == q) {
                             exportSettings.quality = q; markCustom()
@@ -384,7 +399,7 @@ struct ContentView: View {
                             .background(.white.opacity(0.1)).clipShape(Capsule())
                     }
                 }
-                settingsRow(label: "Frame Rate", icon: "film.stack") {
+                settingsRow(label: l10n.frameRateLabel, icon: "film.stack") {
                     ForEach(ExportFrameRate.allCases) { f in
                         settingButton(f.rawValue, selected: exportSettings.frameRate == f) {
                             exportSettings.frameRate = f; markCustom()
@@ -394,7 +409,7 @@ struct ContentView: View {
                         .font(.caption2).foregroundColor(.secondary.opacity(0.6))
                 }
                 if processor.isHDR {
-                    settingsRow(label: "HDR", icon: "sun.max.fill") {
+                    settingsRow(label: l10n.hdrLabel, icon: "sun.max.fill") {
                         Toggle(isOn: Binding(
                             get: { exportSettings.exportHDR },
                             set: { v in
@@ -402,7 +417,7 @@ struct ContentView: View {
                                 if v && exportSettings.codec == .h264 { exportSettings.codec = .hevc }
                                 markCustom()
                             }
-                        )) { Text("Export HDR").font(.system(size: 12)) }
+                        )) { Text(l10n.exportHDR).font(.system(size: 12)) }
                         .toggleStyle(.checkbox)
                         Text(exportSettings.exportHDR
                              ? "HEVC / H.265 — HLG preserved"
@@ -411,19 +426,19 @@ struct ContentView: View {
                     }
                 }
 
-                settingsRow(label: "Audio", icon: "speaker.wave.2") {
+                settingsRow(label: l10n.audioLabel, icon: "speaker.wave.2") {
                     Toggle(isOn: Binding(
                         get: { exportSettings.muteAudio },
                         set: { v in exportSettings.muteAudio = v; markCustom() }
-                    )) { Text("Mute").font(.system(size: 12)) }
+                    )) { Text(l10n.muteLabel).font(.system(size: 12)) }
                     .toggleStyle(.checkbox)
-                    Text(exportSettings.muteAudio ? "No audio in exported Live Photo" : "Keep original audio")
+                    Text(exportSettings.muteAudio ? l10n.muteOnNote : l10n.muteOffNote)
                         .font(.caption2).foregroundColor(.secondary)
                 }
             }
             HStack {
                 Spacer()
-                Button("Change Video") { openVideoFile() }
+                Button(l10n.changeVideo) { openVideoFile() }
                     .buttonStyle(.link).font(.system(size: 11))
             }
         }
@@ -444,11 +459,11 @@ struct ContentView: View {
             }
             Spacer()
             Button(action: exportLivePhoto) {
-                Label("Create Live Photo", systemImage: "livephoto").frame(width: 148, height: 28)
+                Label(l10n.createLivePhoto, systemImage: "livephoto").frame(width: 148, height: 28)
             }
             .buttonStyle(.borderedProminent).controlSize(.large).disabled(processor.isProcessing)
             Button(action: exportAndImportToPhotos) {
-                Label("Save to Photos", systemImage: "photo.on.rectangle.angled").frame(width: 148, height: 28)
+                Label(l10n.saveToPhotos, systemImage: "photo.on.rectangle.angled").frame(width: 148, height: 28)
             }
             .buttonStyle(.bordered).controlSize(.large).disabled(processor.isProcessing)
         }
@@ -468,12 +483,12 @@ struct ContentView: View {
                     .foregroundColor(isDragOver ? .accentColor : .secondary)
             }
             VStack(spacing: 8) {
-                Text("Drop video here")
+                Text(l10n.dropTitle)
                     .font(.system(size: 20, weight: .semibold))
-                Text("MOV, MP4, M4V · HDR supported")
+                Text(l10n.dropSubtitle)
                     .font(.subheadline).foregroundColor(.secondary)
             }
-            Button("Select File") { openVideoFile() }
+            Button(l10n.selectFile) { openVideoFile() }
                 .buttonStyle(.borderedProminent).controlSize(.large)
                 .keyboardShortcut("o", modifiers: .command)
             Spacer()
@@ -558,7 +573,7 @@ struct ContentView: View {
     private var savePresetControl: some View {
         if showingSaveField {
             HStack(spacing: 6) {
-                TextField("Name...", text: $newPresetName)
+                TextField(l10n.presetNamePlaceholder, text: $newPresetName)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11))
                     .padding(.horizontal, 8).padding(.vertical, 4)
@@ -566,7 +581,7 @@ struct ContentView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .frame(width: 110)
                     .onSubmit { commitSavePreset() }
-                Button("Save") { commitSavePreset() }
+                Button(l10n.save) { commitSavePreset() }
                     .buttonStyle(.borderedProminent).controlSize(.small)
                     .disabled(newPresetName.trimmingCharacters(in: .whitespaces).isEmpty)
                 Button("✕") { showingSaveField = false; newPresetName = "" }
@@ -578,7 +593,7 @@ struct ContentView: View {
                     .foregroundColor(.accentColor)
             }
             .buttonStyle(.plain)
-            .help("Save current export settings as a named preset")
+            .help(l10n.savePresetTooltip)
         }
     }
 
@@ -586,10 +601,10 @@ struct ContentView: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(.orange).font(.system(size: 13))
-            Text("片段 \(String(format: "%.1f", endTime - startTime))s 超过 \(String(format: "%.1f", maxDur))s，小红书 Live Photo 动效可能失效")
+            Text(l10n.xhsWarning(cur: endTime - startTime, max: maxDur))
                 .font(.system(size: 11, weight: .medium)).foregroundColor(.orange)
             Spacer()
-            Button("自动裁剪") {
+            Button(l10n.autoCrop) {
                 endTime = min(startTime + maxDur, processor.duration)
                 if coverTime > endTime { coverTime = endTime }
             }
@@ -729,10 +744,10 @@ struct ContentView: View {
         guard let asset = asset else { return }
         Task {
             do {
-                processor.isProcessing = true; processor.statusMessage = "Extracting cover…"; processor.progress = 0
+                processor.isProcessing = true; processor.statusMessage = l10n.statusExtractingCover; processor.progress = 0
                 let coverCM = CMTime(seconds: coverTime, preferredTimescale: 600)
                 let cgImage = try await processor.extractCoverFrame(asset: asset, at: coverCM, exportHDR: exportSettings.exportHDR)
-                processor.statusMessage = "Exporting video clip…"; processor.progress = 0.1
+                processor.statusMessage = l10n.statusExportingClip; processor.progress = 0.1
                 let exportedURL = try await processor.exportVideo(
                     asset: asset,
                     startTime: CMTime(seconds: startTime, preferredTimescale: 600),
@@ -743,7 +758,7 @@ struct ContentView: View {
                 openPanel.title = "Choose Save Location"
                 openPanel.canChooseFiles = false; openPanel.canChooseDirectories = true; openPanel.canCreateDirectories = true
                 guard openPanel.runModal() == .OK, let saveDir = openPanel.url else {
-                    processor.isProcessing = false; processor.statusMessage = "Export cancelled."; return
+                    processor.isProcessing = false; processor.statusMessage = l10n.statusExportCancelled; return
                 }
                 let creator = LivePhotoCreator()
                 let result  = try await creator.createLivePhoto(coverImage: cgImage, videoURL: exportedURL, outputDirectory: saveDir)
@@ -762,7 +777,7 @@ struct ContentView: View {
         guard let asset = asset else { return }
         Task {
             do {
-                processor.isProcessing = true; processor.statusMessage = "Preparing Live Photo…"; processor.progress = 0
+                processor.isProcessing = true; processor.statusMessage = l10n.statusExtractingCover; processor.progress = 0
                 let coverCM = CMTime(seconds: coverTime, preferredTimescale: 600)
                 let cgImage = try await processor.extractCoverFrame(asset: asset, at: coverCM, exportHDR: exportSettings.exportHDR)
                 processor.progress = 0.1
@@ -771,18 +786,18 @@ struct ContentView: View {
                     startTime: CMTime(seconds: startTime, preferredTimescale: 600),
                     endTime:   CMTime(seconds: endTime,   preferredTimescale: 600),
                     settings: exportSettings)
-                processor.statusMessage = "Creating Live Photo pair…"; processor.progress = 0.85
+                processor.statusMessage = l10n.statusCreatingPair; processor.progress = 0.85
                 let tempDir = FileManager.default.temporaryDirectory
                     .appendingPathComponent("LivePhotoMaker_\(UUID().uuidString)")
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
                 let creator = LivePhotoCreator()
                 let result  = try await creator.createLivePhoto(coverImage: cgImage, videoURL: exportedURL, outputDirectory: tempDir)
-                processor.statusMessage = "Importing to Photos…"; processor.progress = 0.95
+                processor.statusMessage = l10n.statusImporting; processor.progress = 0.95
                 try await creator.importToPhotos(imageURL: result.imageURL, videoURL: result.videoURL)
                 try? FileManager.default.removeItem(at: tempDir)
                 try? FileManager.default.removeItem(at: exportedURL)
                 processor.isProcessing = false; processor.progress = 1.0
-                processor.statusMessage = "Live Photo saved to Photos!"
+                processor.statusMessage = l10n.statusSavedToPhotos
             } catch {
                 processor.isProcessing = false; processor.statusMessage = ""
                 errorMessage = error.localizedDescription; showError = true

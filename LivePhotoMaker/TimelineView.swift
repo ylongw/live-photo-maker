@@ -10,6 +10,8 @@ struct TimelineView: View {
     let thumbnails: [NSImage]
     var coverFramePreview: NSImage?
 
+    @EnvironmentObject private var l10n: L10n
+
     // ── Drag state for trim handles ──────────────────────────────────────────
     // We record origin times at drag-start so translation math stays correct
     // even as the bindings update during the drag.
@@ -23,7 +25,7 @@ struct TimelineView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Timeline")
+            Text(l10n.timeline)
                 .font(.headline)
 
             GeometryReader { geometry in
@@ -196,7 +198,7 @@ struct TimelineView: View {
             // ── Precision sliders (fine-tuning) ──────────────────────────────
             HStack(spacing: 20) {
                 VStack(alignment: .leading) {
-                    Text("Start: \(formatTime(startTime))")
+                    Text("\(l10n.startLabel): \(formatTime(startTime))")
                         .font(.caption).monospacedDigit()
                     Slider(value: $startTime, in: 0...max(duration, 0.01))
                         .onChange(of: startTime) { val in
@@ -205,7 +207,7 @@ struct TimelineView: View {
                         }
                 }
                 VStack(alignment: .leading) {
-                    Text("End: \(formatTime(endTime))")
+                    Text("\(l10n.endLabel): \(formatTime(endTime))")
                         .font(.caption).monospacedDigit()
                     Slider(value: $endTime, in: 0...max(duration, 0.01))
                         .onChange(of: endTime) { val in
@@ -214,7 +216,7 @@ struct TimelineView: View {
                         }
                 }
                 VStack(alignment: .leading) {
-                    Text("Cover: \(formatTime(coverTime))")
+                    Text("\(l10n.coverLabel): \(formatTime(coverTime))")
                         .font(.caption).monospacedDigit()
                     let lo = min(startTime, endTime)
                     let hi = max(startTime, endTime, 0.01)
@@ -223,10 +225,10 @@ struct TimelineView: View {
             }
 
             HStack {
-                Text("Clip duration: \(formatTime(endTime - startTime))")
+                Text("\(l10n.clipDuration) \(formatTime(endTime - startTime))")
                     .font(.caption).foregroundColor(.secondary)
                 Spacer()
-                Text("Total: \(formatTime(duration))")
+                Text("\(l10n.totalDuration) \(formatTime(duration))")
                     .font(.caption).foregroundColor(.secondary)
             }
         }

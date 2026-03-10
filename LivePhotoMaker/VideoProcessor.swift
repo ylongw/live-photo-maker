@@ -12,8 +12,8 @@ enum ExportCodec: String, CaseIterable, Identifiable, Codable {
 
     var note: String {
         self == .h264
-            ? "Compatible · larger file"
-            : "Smaller file · requires macOS 10.13+"
+            ? L10n.shared.codecH264Note
+            : L10n.shared.codecHevcNote
     }
 }
 
@@ -78,11 +78,11 @@ enum PlatformPreset: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
 
     var label: String {
-        self == .custom
-            ? "Custom"
-            : self == .xiaohongshu
-                ? "🍠 小红书"
-                : "🎵 抖音"
+        switch self {
+        case .custom:      return L10n.shared.presetCustom
+        case .xiaohongshu: return "🍠 小红书"
+        case .douyin:      return "🎵 抖音"
+        }
     }
 
     var recommended: ExportSettings {
@@ -203,7 +203,7 @@ class VideoProcessor: ObservableObject {
     ) async throws -> URL {
         isProcessing = true
         progress = 0
-        statusMessage = "Exporting video..."
+        statusMessage = L10n.shared.statusExportingVideo
 
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -222,7 +222,7 @@ class VideoProcessor: ObservableObject {
 
         isProcessing = false
         progress = 1.0
-        statusMessage = "Video export complete."
+        statusMessage = L10n.shared.statusExportComplete
         return outputURL
     }
 
