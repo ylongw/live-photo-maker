@@ -205,7 +205,7 @@ struct ContentView: View {
                                     thumbnails: thumbnails,
                                     coverFramePreview: coverFramePreview
                                 )
-                                .padding(.top, coverFramePreview != nil ? 60 : 0)
+                                .padding(.top, coverFramePreview != nil ? 90 : 0)
                             }
                             .padding(.horizontal, 24)
                             .onChange(of: coverTime) { newTime in

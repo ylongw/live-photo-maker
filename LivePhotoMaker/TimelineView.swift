@@ -105,10 +105,10 @@ struct TimelineView: View {
                                 )
                         }
 
-                        // ── 5. Cover frame line (visual) ──────────────────────
+                        // ── 5. Cover frame line (visual, full strip height) ───
                         Rectangle()
                             .fill(Color.red)
-                            .frame(width: 2, height: 60)
+                            .frame(width: 2, height: 50)
                             .position(x: coverX, y: 25)
 
                         // ── 6. Left trim handle ───────────────────────────────
@@ -139,15 +139,16 @@ struct TimelineView: View {
                                     .onEnded { _ in endDragOrigin = nil }
                             )
 
-                        // ── 8. Cover frame drag handle (highest priority) ─────
-                        // Use translation+origin (same pattern as trim handles).
-                        // value.location.x is in the circle's local 14×14 frame,
-                        // NOT the parent ZStack — using it directly gave wrong math.
+                        // ── 8. Cover frame drag handle ───────────────────────
+                        // IMPORTANT: positioned at y=56 (INSIDE the GeometryReader
+                        // height of 68pt). The old y=-2 put it above the frame, and
+                        // GlassCard's clipShape cut off the gesture hit-area — making
+                        // it impossible to drag, especially for portrait videos.
                         Circle()
                             .fill(Color.red)
-                            .frame(width: 14, height: 14)
-                            .shadow(radius: 1)
-                            .position(x: coverX, y: -2)
+                            .frame(width: 16, height: 16)
+                            .shadow(color: .black.opacity(0.25), radius: 2)
+                            .position(x: coverX, y: 56)
                             .gesture(
                                 DragGesture(minimumDistance: 0)
                                     .onChanged { value in
@@ -160,8 +161,15 @@ struct TimelineView: View {
                             )
 
                         // ── 9. Cover frame preview popup ──────────────────────
+                        // Popup dimensions adapt to the source image aspect ratio
+                        // so portrait videos show a properly-proportioned thumbnail.
                         if let preview = coverFramePreview {
-                            let pw: Double = 96, ph: Double = 54
+                            let imageAspect = preview.size.height > 0
+                                ? Double(preview.size.width / preview.size.height)
+                                : 16.0 / 9.0
+                            let isPortrait = imageAspect < 0.75
+                            let pw: Double = isPortrait ? 42 : 90
+                            let ph: Double = isPortrait ? 72 : 54
                             let clampedX = min(max(pw / 2, coverX), Double(W) - pw / 2)
                             VStack(spacing: 2) {
                                 Image(nsImage: preview)
@@ -177,13 +185,13 @@ struct TimelineView: View {
                                     .fill(Color.red)
                                     .frame(width: 8, height: 5)
                             }
-                            .position(x: clampedX, y: -(ph / 2 + 12))
+                            .position(x: clampedX, y: -(ph / 2 + 10))
                             .animation(.easeInOut(duration: 0.1), value: coverX)
                         }
                     }
                 }
             }
-            .frame(height: 60)
+            .frame(height: 68)   // extra 8pt at bottom for cover handle circle
 
             // ── Precision sliders (fine-tuning) ──────────────────────────────
             HStack(spacing: 20) {
@@ -277,7 +285,10 @@ class ThumbnailGenerator {
     static func generateThumbnails(asset: AVAsset, count: Int = 10) async -> [NSImage] {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 160, height: 90)
+        // Use a square max-size so portrait videos get properly-sized thumbnails.
+        // For landscape (e.g. 3840×2160): scales to 160×90.
+        // For portrait (e.g. 1080×1920): scales to 90×160 — still shows correctly.
+        generator.maximumSize = CGSize(width: 160, height: 160)
 
         var thumbnails: [NSImage] = []
         do {
