@@ -38,6 +38,11 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 cp "$OUT_BIN" "$APP_BUNDLE/Contents/MacOS/LivePhotoMaker"
 cp LivePhotoMaker/Info.plist "$APP_BUNDLE/Contents/"
+# App icon
+if [ -f LivePhotoMaker/AppIcon.icns ]; then
+    cp LivePhotoMaker/AppIcon.icns "$APP_BUNDLE/Contents/Resources/"
+    echo "🎨 Icon: AppIcon.icns"
+fi
 printf "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 chmod +x "$APP_BUNDLE/Contents/MacOS/LivePhotoMaker"
 
