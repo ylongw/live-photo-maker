@@ -158,14 +158,23 @@ class VideoProcessor: ObservableObject {
         return false
     }
 
-    func extractCoverFrame(asset: AVAsset, at time: CMTime) async throws -> CGImage {
+    /// - Parameter exportHDR: When true, preserves HLG/PQ dynamic range in the returned CGImage.
+    ///   When false (SDR export), lets AVAssetImageGenerator apply the built-in tone-map so the
+    ///   cover frame matches the SDR video's visual appearance.
+    func extractCoverFrame(asset: AVAsset, at time: CMTime, exportHDR: Bool = false) async throws -> CGImage {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
-        if #available(macOS 15.0, *) {
+        if exportHDR, #available(macOS 15.0, *) {
+            // Match the source dynamic range: returns an HLG/PQ CGImage for HDR sources.
+            // Note: Photos.app's still-image renderer uses Apple Adaptive HDR (gain maps) for
+            // full EDR brightness; a plain HLG HEIC without a gain map may appear slightly
+            // different from the HDR video component. For SDR export, tone-map to match the video.
             generator.dynamicRangePolicy = .matchSource
         }
+        // When exportHDR=false (or macOS < 15), AVAssetImageGenerator returns a tone-mapped
+        // SDR CGImage in sRGB — consistent with the SDR-exported MOV.
         let (cgImage, _) = try await generator.image(at: time)
         return cgImage
     }

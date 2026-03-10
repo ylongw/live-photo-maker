@@ -567,7 +567,7 @@ struct ContentView: View {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled, let asset = asset else { return }
             let cmTime = CMTime(seconds: time, preferredTimescale: 600)
-            if let cg = try? await processor.extractCoverFrame(asset: asset, at: cmTime) {
+            if let cg = try? await processor.extractCoverFrame(asset: asset, at: cmTime, exportHDR: exportSettings.exportHDR) {
                 coverFramePreview = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
             }
         }
@@ -673,7 +673,7 @@ struct ContentView: View {
             do {
                 processor.isProcessing = true; processor.statusMessage = "Extracting cover…"; processor.progress = 0
                 let coverCM = CMTime(seconds: coverTime, preferredTimescale: 600)
-                let cgImage = try await processor.extractCoverFrame(asset: asset, at: coverCM)
+                let cgImage = try await processor.extractCoverFrame(asset: asset, at: coverCM, exportHDR: exportSettings.exportHDR)
                 processor.statusMessage = "Exporting video clip…"; processor.progress = 0.1
                 let exportedURL = try await processor.exportVideo(
                     asset: asset,
@@ -706,7 +706,7 @@ struct ContentView: View {
             do {
                 processor.isProcessing = true; processor.statusMessage = "Preparing Live Photo…"; processor.progress = 0
                 let coverCM = CMTime(seconds: coverTime, preferredTimescale: 600)
-                let cgImage = try await processor.extractCoverFrame(asset: asset, at: coverCM)
+                let cgImage = try await processor.extractCoverFrame(asset: asset, at: coverCM, exportHDR: exportSettings.exportHDR)
                 processor.progress = 0.1
                 let exportedURL = try await processor.exportVideo(
                     asset: asset,
