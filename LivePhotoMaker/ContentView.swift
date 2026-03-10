@@ -4,11 +4,24 @@ import AVFoundation
 import AppKit
 import UniformTypeIdentifiers
 
+// ── File queue item ────────────────────────────────────────────────────────────
+struct FileQueueItem: Identifiable, Equatable {
+    let id = UUID()
+    let url: URL
+    var name: String { url.lastPathComponent }
+    static func == (a: FileQueueItem, b: FileQueueItem) -> Bool { a.url == b.url }
+}
+
+// ── Main view ──────────────────────────────────────────────────────────────────
 struct ContentView: View {
     @StateObject private var processor = VideoProcessor()
     @State private var player: AVPlayer?
     @State private var asset: AVAsset?
     @State private var videoURL: URL?
+
+    // ── File queue ───────────────────────────────────────────────────────────
+    @State private var fileQueue: [FileQueueItem] = []
+    @State private var currentQueueIndex: Int = -1
 
     @State private var coverTime: Double = 0
     @State private var startTime: Double = 0
@@ -31,12 +44,99 @@ struct ContentView: View {
     @State private var loopObserver: Any? = nil
 
     var body: some View {
+        HStack(spacing: 0) {
+            // ── File queue sidebar ───────────────────────────────────────────
+            if !fileQueue.isEmpty {
+                fileSidebarView
+                Divider()
+            }
+
+            // ── Main editing area ────────────────────────────────────────────
+            mainEditingArea
+        }
+        .frame(minWidth: fileQueue.isEmpty ? 700 : 870, minHeight: 550)
+        .alert("Error", isPresented: $showError) { Button("OK") {} } message: { Text(errorMessage) }
+        .onDrop(of: [.fileURL], isTargeted: $isDragOver) { handleDrop(providers: $0) }
+    }
+
+    // ── File queue sidebar view ────────────────────────────────────────────────
+    private var fileSidebarView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Text("Files")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button(action: openVideoFile) {
+                    Image(systemName: "plus.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .help("Add more videos")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(Array(fileQueue.enumerated()), id: \.element.id) { index, item in
+                        HStack(spacing: 7) {
+                            Image(systemName: index == currentQueueIndex
+                                  ? "film.fill" : "film")
+                                .font(.caption)
+                                .foregroundColor(index == currentQueueIndex ? .accentColor : .secondary)
+                            Text(item.name)
+                                .font(.caption2)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .foregroundColor(index == currentQueueIndex ? .primary : .secondary)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(index == currentQueueIndex
+                                      ? Color.accentColor.opacity(0.15)
+                                      : Color.clear)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture { switchToFile(at: index) }
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
+            }
+        }
+        .frame(width: 170)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    // ── Main editing area ──────────────────────────────────────────────────────
+    private var mainEditingArea: some View {
         VStack(spacing: 0) {
             // Top bar
             HStack {
                 Text("LivePhotoMaker")
                     .font(.title2)
                     .fontWeight(.semibold)
+
+                // Current filename
+                if let url = videoURL {
+                    Text(url.lastPathComponent)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.secondary.opacity(0.1)))
+                }
+
                 Spacer()
                 if processor.isHDR {
                     Label("HDR", systemImage: "sparkles.tv")
@@ -44,10 +144,7 @@ struct ContentView: View {
                         .fontWeight(.medium)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(
-                            Capsule()
-                                .fill(Color.purple.opacity(0.2))
-                        )
+                        .background(Capsule().fill(Color.purple.opacity(0.2)))
                         .foregroundColor(.purple)
                 }
             }
@@ -218,16 +315,7 @@ struct ContentView: View {
                 dropZoneView
             }
         }
-        .frame(minWidth: 700, minHeight: 550)
-        .alert("Error", isPresented: $showError) {
-            Button("OK") {}
-        } message: {
-            Text(errorMessage)
-        }
-        .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
-            handleDrop(providers: providers)
-        }
-    }
+    }   // end mainEditingArea
 
     private var dropZoneView: some View {
         VStack(spacing: 20) {
@@ -268,40 +356,48 @@ struct ContentView: View {
     private func openVideoFile() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [
-            UTType.movie,
-            UTType.mpeg4Movie,
-            UTType.quickTimeMovie,
+            UTType.movie, UTType.mpeg4Movie, UTType.quickTimeMovie,
             UTType(filenameExtension: "m4v") ?? .movie,
         ]
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true   // ← allows batch import
         panel.canChooseDirectories = false
 
-        if panel.runModal() == .OK, let url = panel.url {
-            loadVideo(url: url)
+        if panel.runModal() == .OK {
+            for url in panel.urls { addToQueue(url) }
         }
     }
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
-
-        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-            guard let data = item as? Data,
-                  let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-
-            let supportedExtensions = ["mov", "mp4", "m4v", "avi", "mkv"]
-            guard supportedExtensions.contains(url.pathExtension.lowercased()) else {
-                Task { @MainActor in
-                    errorMessage = "Unsupported file format. Please use MOV, MP4, or M4V."
-                    showError = true
-                }
-                return
+        let supported = ["mov", "mp4", "m4v", "avi", "mkv"]
+        var anyHandled = false
+        for provider in providers {
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                guard let data = item as? Data,
+                      let url  = URL(dataRepresentation: data, relativeTo: nil),
+                      supported.contains(url.pathExtension.lowercased()) else { return }
+                Task { @MainActor in addToQueue(url) }
             }
-
-            Task { @MainActor in
-                loadVideo(url: url)
-            }
+            anyHandled = true
         }
-        return true
+        return anyHandled
+    }
+
+    // ── File queue management ──────────────────────────────────────────────────
+
+    /// Add a URL to the queue (deduplicates) and switch to it.
+    private func addToQueue(_ url: URL) {
+        if let existing = fileQueue.firstIndex(where: { $0.url == url }) {
+            switchToFile(at: existing); return
+        }
+        fileQueue.append(FileQueueItem(url: url))
+        switchToFile(at: fileQueue.count - 1)
+    }
+
+    /// Switch the editor to an already-queued file.
+    private func switchToFile(at index: Int) {
+        guard index >= 0, index < fileQueue.count else { return }
+        currentQueueIndex = index
+        loadVideoContent(url: fileQueue[index].url)
     }
 
     // ── Loop preview ───────────────────────────────────────────────────────────
@@ -343,10 +439,9 @@ struct ContentView: View {
         return String(format: "%d:%02d.%02d", mins, secs, frac)
     }
 
-    // ── Load video ──────────────────────────────────────────────────────────────
+    // ── Load video content (called by queue switch) ────────────────────────────
 
-    private func loadVideo(url: URL) {
-        // Clean up before loading new video
+    private func loadVideoContent(url: URL) {
         stopLoopPreview()
         isLoopPreview = false
         videoURL = url
@@ -359,14 +454,10 @@ struct ContentView: View {
 
         Task {
             _ = await processor.loadAsset(url: url)
-
-            // Set default trim: full video or max 3 seconds
             let totalDuration = processor.duration
             startTime = 0
             endTime = min(totalDuration, 3.0)
             coverTime = 0
-
-            // Generate thumbnails
             thumbnails = await ThumbnailGenerator.generateThumbnails(asset: avAsset)
         }
     }

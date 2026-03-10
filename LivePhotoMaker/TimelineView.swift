@@ -17,6 +17,9 @@ struct TimelineView: View {
     @State private var endDragOrigin: Double? = nil
     @State private var panDragOriginStart: Double? = nil
     @State private var panDragOriginEnd: Double? = nil
+    // Cover handle also needs origin — DragGesture.location is in the circle's
+    // local frame (0…14 px), NOT the parent ZStack, so we must use translation.
+    @State private var coverDragOrigin: Double? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -137,6 +140,9 @@ struct TimelineView: View {
                             )
 
                         // ── 8. Cover frame drag handle (highest priority) ─────
+                        // Use translation+origin (same pattern as trim handles).
+                        // value.location.x is in the circle's local 14×14 frame,
+                        // NOT the parent ZStack — using it directly gave wrong math.
                         Circle()
                             .fill(Color.red)
                             .frame(width: 14, height: 14)
@@ -145,10 +151,12 @@ struct TimelineView: View {
                             .gesture(
                                 DragGesture(minimumDistance: 0)
                                     .onChanged { value in
-                                        let frac    = max(0, min(1, Double(value.location.x) / Double(W)))
-                                        let newTime = frac * duration
-                                        coverTime   = max(startTime, min(endTime, newTime))
+                                        if coverDragOrigin == nil { coverDragOrigin = coverTime }
+                                        let originX = ((coverDragOrigin ?? coverTime) / max(duration, 0.001)) * Double(W)
+                                        let newX    = max(0, min(Double(W), originX + Double(value.translation.width)))
+                                        coverTime   = max(startTime, min(endTime, (newX / Double(W)) * duration))
                                     }
+                                    .onEnded { _ in coverDragOrigin = nil }
                             )
 
                         // ── 9. Cover frame preview popup ──────────────────────
