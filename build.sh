@@ -29,6 +29,7 @@ swiftc \
   LivePhotoMaker/LivePhotoCreator.swift \
   LivePhotoMaker/VideoPlayerView.swift \
   LivePhotoMaker/TimelineView.swift \
+  LivePhotoMaker/SavedPreset.swift \
   -o "$OUT_BIN"
 
 echo "📦 Packaging app bundle..."
