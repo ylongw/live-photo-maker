@@ -6,11 +6,15 @@ import UniformTypeIdentifiers
 class LivePhotoCreator {
 
     /// Creates a Live Photo pair by stamping both the image and video with the same content identifier UUID.
-    /// Returns the directory containing the paired files.
+    /// - Parameter coverOffset: Time (in seconds) of the cover frame within the *exported* (trimmed) video,
+    ///   i.e. `coverTime - startTime`. Photos.app uses this to offer "Make Key Photo" and to sync
+    ///   the still image with the correct video frame. When it is -1 Photos cannot locate the key
+    ///   frame and disables the "Make Key Photo" option.
     func createLivePhoto(
         coverImage: CGImage,
         videoURL: URL,
-        outputDirectory: URL
+        outputDirectory: URL,
+        coverOffset: Double = 0
     ) async throws -> (imageURL: URL, videoURL: URL) {
         let uuid = UUID().uuidString
 
@@ -18,9 +22,10 @@ class LivePhotoCreator {
         let imageURL = outputDirectory.appendingPathComponent("IMG_\(uuid).heic")
         try writeImageWithContentIdentifier(cgImage: coverImage, uuid: uuid, to: imageURL)
 
-        // Write the video with the content identifier
+        // Write the video with the content identifier + still-image-time
         let pairedVideoURL = outputDirectory.appendingPathComponent("IMG_\(uuid).mov")
-        try await writeVideoWithContentIdentifier(sourceURL: videoURL, uuid: uuid, to: pairedVideoURL)
+        try await writeVideoWithContentIdentifier(
+            sourceURL: videoURL, uuid: uuid, coverOffset: coverOffset, to: pairedVideoURL)
 
         return (imageURL: imageURL, videoURL: pairedVideoURL)
     }
@@ -57,36 +62,44 @@ class LivePhotoCreator {
         }
     }
 
-    /// Writes the video MOV file with the content identifier metadata using AVAssetExportSession.
-    private func writeVideoWithContentIdentifier(sourceURL: URL, uuid: String, to outputURL: URL) async throws {
+    /// Writes the video MOV file with the content identifier + still-image-time metadata.
+    /// - Parameter coverOffset: Seconds from the start of the *trimmed* video where the cover frame is.
+    ///   Photos.app reads this to enable "Make Key Photo" and to seek to the right frame on playback.
+    private func writeVideoWithContentIdentifier(
+        sourceURL: URL,
+        uuid: String,
+        coverOffset: Double,
+        to outputURL: URL
+    ) async throws {
         let asset = AVURLAsset(url: sourceURL)
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
             throw LivePhotoError.failedToWriteMetadata
         }
 
-        // Add content identifier metadata
+        // ── Content Identifier ─────────────────────────────────────────────────
         let idItem = AVMutableMetadataItem()
         idItem.keySpace = .quickTimeMetadata
-        idItem.key = "com.apple.quicktime.content.identifier" as NSString
-        idItem.value = uuid as NSString
+        idItem.key     = "com.apple.quicktime.content.identifier" as NSString
+        idItem.value   = uuid as NSString
         idItem.dataType = "com.apple.metadata.datatype.UTF-8"
 
-        // Add still-image-time metadata (required for Live Photos)
+        // ── Still-image-time ───────────────────────────────────────────────────
+        // Must be the time offset (in seconds) of the cover frame within the
+        // *exported* video — NOT -1. Setting -1 leaves Photos unable to locate
+        // the key frame, which disables the "Make Key Photo" UI option.
         let timeItem = AVMutableMetadataItem()
         timeItem.keySpace = .quickTimeMetadata
-        timeItem.key = "com.apple.quicktime.still-image-time" as NSString
-        timeItem.value = NSNumber(value: -1)
-        timeItem.dataType = "com.apple.metadata.datatype.int8"
+        timeItem.key     = "com.apple.quicktime.still-image-time" as NSString
+        timeItem.value   = NSNumber(value: Float(max(0, coverOffset)))
+        timeItem.dataType = "com.apple.metadata.datatype.float32"
 
-        session.metadata = [idItem, timeItem]
-        session.outputURL = outputURL
+        session.metadata   = [idItem, timeItem]
+        session.outputURL  = outputURL
         session.outputFileType = .mov
 
         await session.export()
 
-        if let error = session.error {
-            throw error
-        }
+        if let error = session.error { throw error }
 
         guard session.status == .completed else {
             throw LivePhotoError.contentIdentifierWriteFailed

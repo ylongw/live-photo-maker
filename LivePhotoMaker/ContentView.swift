@@ -761,7 +761,7 @@ struct ContentView: View {
                     processor.isProcessing = false; processor.statusMessage = l10n.statusExportCancelled; return
                 }
                 let creator = LivePhotoCreator()
-                let result  = try await creator.createLivePhoto(coverImage: cgImage, videoURL: exportedURL, outputDirectory: saveDir)
+                let result  = try await creator.createLivePhoto(coverImage: cgImage, videoURL: exportedURL, outputDirectory: saveDir, coverOffset: coverTime - startTime)
                 try? FileManager.default.removeItem(at: exportedURL)
                 processor.isProcessing = false; processor.progress = 1.0
                 processor.statusMessage = "Saved! \(result.imageURL.lastPathComponent) + \(result.videoURL.lastPathComponent)"
@@ -791,7 +791,7 @@ struct ContentView: View {
                     .appendingPathComponent("LivePhotoMaker_\(UUID().uuidString)")
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
                 let creator = LivePhotoCreator()
-                let result  = try await creator.createLivePhoto(coverImage: cgImage, videoURL: exportedURL, outputDirectory: tempDir)
+                let result  = try await creator.createLivePhoto(coverImage: cgImage, videoURL: exportedURL, outputDirectory: tempDir, coverOffset: coverTime - startTime)
                 processor.statusMessage = l10n.statusImporting; processor.progress = 0.95
                 try await creator.importToPhotos(imageURL: result.imageURL, videoURL: result.videoURL)
                 try? FileManager.default.removeItem(at: tempDir)
