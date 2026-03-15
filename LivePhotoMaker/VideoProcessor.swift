@@ -62,7 +62,7 @@ enum ExportFrameRate: String, CaseIterable, Identifiable, Codable {
 }
 
 struct ExportSettings: Codable, Equatable {
-    var codec: ExportCodec = .h264
+    var codec: ExportCodec = .hevc
     var resolution: ExportResolution = .source
     var quality: ExportQuality = .high
     var frameRate: ExportFrameRate = .source

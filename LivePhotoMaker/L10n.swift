@@ -105,6 +105,8 @@ final class L10n: ObservableObject {
           "Clip \(String(format: "%.1f", cur))s exceeds \(String(format: "%.1f", max))s, XHS Live Photo effect may not play")
     }
     var autoCrop: String         { t("自动裁剪", "Auto Trim") }
+    var removeFromList: String   { t("从列表移除", "Remove from List") }
+    var moveToTrash: String      { t("移到废纸篓", "Move to Trash") }
 
     // Export bar
     var createLivePhoto: String  { t("创建 Live Photo", "Create Live Photo") }

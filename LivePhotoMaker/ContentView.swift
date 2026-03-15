@@ -151,6 +151,18 @@ struct ContentView: View {
                             .fill(index == currentQueueIndex ? Color.accentColor.opacity(0.18) : Color.clear))
                         .contentShape(Rectangle())
                         .onTapGesture { switchToFile(at: index) }
+                        .contextMenu {
+                            Button {
+                                removeFromQueue(index: index)
+                            } label: {
+                                Label(l10n.removeFromList, systemImage: "minus.circle")
+                            }
+                            Button(role: .destructive) {
+                                trashQueueFile(index: index)
+                            } label: {
+                                Label(l10n.moveToTrash, systemImage: "trash")
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 8)
@@ -714,9 +726,37 @@ struct ContentView: View {
         loadVideoContent(url: fileQueue[index].url)
     }
 
+    /// Remove item from queue list (file on disk untouched).
+    private func removeFromQueue(index: Int) {
+        guard index >= 0, index < fileQueue.count else { return }
+        fileQueue.remove(at: index)
+        if fileQueue.isEmpty {
+            currentQueueIndex = -1
+            player = nil; videoURL = nil; asset = nil
+        } else {
+            let next = min(index, fileQueue.count - 1)
+            if currentQueueIndex == index {
+                currentQueueIndex = next
+                loadVideoContent(url: fileQueue[next].url)
+            } else if index < currentQueueIndex {
+                currentQueueIndex -= 1
+            }
+        }
+    }
+
+    /// Move the file to macOS Trash, then remove from queue.
+    private func trashQueueFile(index: Int) {
+        guard index >= 0, index < fileQueue.count else { return }
+        let url = fileQueue[index].url
+        try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        removeFromQueue(index: index)
+    }
+
     private func loadVideoContent(url: URL) {
         stopLoopPreview(); isLoopPreview = false; platformPreset = .custom
-        exportSettings = ExportSettings(); activeCustomPreset = nil
+        // Keep user's codec/resolution/quality/fps/mute settings across file switches.
+        // Only reset per-file properties (HDR auto-detect, active preset, cover frame).
+        exportSettings.exportHDR = false; activeCustomPreset = nil
         videoURL = url; coverFramePreview = nil; coverPreviewTask?.cancel()
         isPortraitVideo = false   // reset; detect below
         let avAsset = AVAsset(url: url)
