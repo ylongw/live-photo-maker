@@ -171,6 +171,15 @@ struct ContentView: View {
         .frame(width: 200)
         .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow))
         .overlay(Rectangle().fill(.secondary.opacity(0.2)).frame(width: 0.5), alignment: .trailing)
+        // ⌘⌫ → Move to Trash (Finder-standard shortcut for selected sidebar item)
+        .background(
+            Group {
+                Button("") { trashQueueFile(index: currentQueueIndex) }
+                    .keyboardShortcut(.delete, modifiers: .command)
+                    .opacity(0).allowsHitTesting(false)
+            }
+            .disabled(currentQueueIndex < 0)
+        )
     }
 
     // ── Main editing area ──────────────────────────────────────────────────────
