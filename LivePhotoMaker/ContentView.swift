@@ -635,65 +635,62 @@ struct ContentView: View {
     private var colorPanel: some View {
         GlassCard(cornerRadius: 16) {
             VStack(spacing: 0) {
-                // Header row — always visible
-                HStack {
-                    Label(l10n.colorGradeTitle, systemImage: "camera.filters")
-                        .font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                    // Auto-enhance toggle
-                    Toggle(l10n.autoEnhance, isOn: $autoEnhanceEnabled)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .onChange(of: autoEnhanceEnabled) { on in
-                            if on { runAutoEnhance() }
-                            else  { autoFilterParams = []; scheduleGradePreview() }
-                        }
-                    Button {
-                        withAnimation(.spring(duration: 0.25)) { colorPanelExpanded.toggle() }
-                    } label: {
+                // ── Header row (always visible) ────────────────────────────
+                Button {
+                    withAnimation(.spring(duration: 0.25)) { colorPanelExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 10) {
+                        Label(l10n.colorGradeTitle, systemImage: "camera.filters")
+                            .font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        // Auto Enhance toggle (always accessible without expanding)
+                        Toggle(l10n.autoEnhance, isOn: $autoEnhanceEnabled)
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                            .onChange(of: autoEnhanceEnabled) { on in
+                                if on { runAutoEnhance() }
+                                else  { autoFilterParams = []; scheduleGradePreview() }
+                            }
+                            .onTapGesture {} // prevent toggle tap from collapsing panel
                         Image(systemName: colorPanelExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .frame(width: 24, height: 24)
+                            .font(.system(size: 10)).foregroundColor(.secondary)
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
+                .buttonStyle(.plain)
 
+                // ── Sliders (expandable) ────────────────────────────────────
                 if colorPanelExpanded {
                     Divider().opacity(0.12)
                     VStack(spacing: 8) {
-                        colorSliderRow(l10n.exposure,   $colorGrade.exposure,   -3...3,    neutral: 0)
-                        colorSliderRow(l10n.highlights, $colorGrade.highlights,  0...1,    neutral: 1)
-                        colorSliderRow(l10n.shadows,    $colorGrade.shadows,     0...1,    neutral: 0)
-                        colorSliderRow(l10n.contrast,   $colorGrade.contrast,    0.5...1.5, neutral: 1)
-                        colorSliderRow(l10n.brightness, $colorGrade.brightness, -0.5...0.5, neutral: 0)
-                        colorSliderRow(l10n.saturation, $colorGrade.saturation,  0...2,    neutral: 1)
-                        colorSliderRow(l10n.vibrance,   $colorGrade.vibrance,   -1...1,    neutral: 0)
-                        colorSliderRow(l10n.sharpness,  $colorGrade.sharpness,   0...2,    neutral: 0)
+                        colorSliderRow(l10n.exposure,   value: $colorGrade.exposure,   range: -3...3,     neutral: 0)
+                        colorSliderRow(l10n.contrast,   value: $colorGrade.contrast,   range: 0.5...1.5,  neutral: 1)
+                        colorSliderRow(l10n.brightness, value: $colorGrade.brightness, range: -0.5...0.5, neutral: 0)
+                        colorSliderRow(l10n.highlights, value: $colorGrade.highlights, range: 0...1,      neutral: 1)
+                        colorSliderRow(l10n.shadows,    value: $colorGrade.shadows,    range: 0...1,      neutral: 0)
+                        colorSliderRow(l10n.saturation, value: $colorGrade.saturation, range: 0...2,      neutral: 1)
+                        colorSliderRow(l10n.vibrance,   value: $colorGrade.vibrance,   range: -1...1,     neutral: 0)
+                        colorSliderRow(l10n.sharpness,  value: $colorGrade.sharpness,  range: 0...2,      neutral: 0)
 
                         if !colorGrade.isIdentity {
-                            Button {
-                                colorGrade = .identity
-                                scheduleGradePreview()
-                            } label: {
+                            Button { colorGrade = .identity; scheduleGradePreview() } label: {
                                 Label(l10n.resetGrade, systemImage: "arrow.counterclockwise")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 11)).foregroundColor(.secondary)
                             }
                             .buttonStyle(.plain)
-                            .padding(.top, 4)
+                            .padding(.top, 2)
                         }
                     }
-                    .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 14)
+                    .padding(.horizontal, 16).padding(.bottom, 14).padding(.top, 8)
                 }
             }
         }
     }
 
+    @ViewBuilder
     private func colorSliderRow(_ label: String,
-                                 _ value: Binding<Double>,
-                                 _ range: ClosedRange<Double>,
+                                 value: Binding<Double>,
+                                 range: ClosedRange<Double>,
                                  neutral: Double) -> some View {
         HStack(spacing: 8) {
             Text(label)
@@ -702,29 +699,30 @@ struct ContentView: View {
                 .foregroundColor(.secondary)
             Slider(value: value, in: range)
                 .onChange(of: value.wrappedValue) { _ in scheduleGradePreview() }
+            // Numeric delta display
             let delta = value.wrappedValue - neutral
             Text(delta == 0 ? "—" : String(format: "%+.2f", delta))
                 .font(.system(size: 10, design: .monospaced))
                 .frame(width: 40, alignment: .trailing)
-                .foregroundColor(delta == 0 ? .secondary.opacity(0.35) : .accentColor)
+                .foregroundColor(delta == 0 ? .secondary.opacity(0.4) : .accentColor)
+            // Dot-reset button
             Button { value.wrappedValue = neutral; scheduleGradePreview() } label: {
                 Circle()
-                    .fill(delta == 0 ? Color.clear : Color.accentColor.opacity(0.8))
+                    .fill(delta == 0 ? Color.clear : Color.accentColor)
                     .frame(width: 7, height: 7)
                     .overlay(Circle().stroke(Color.secondary.opacity(0.3), lineWidth: 0.5))
             }
             .buttonStyle(.plain)
-            .help("Reset")
+            .help("Reset to neutral")
         }
     }
 
-    // ── Color grade helpers ──────────────────────────────────────────────────
-
-    /// Debounced preview recompute — runs 150 ms after the last slider change.
+    // ── Color grade helpers ────────────────────────────────────────────────────
+    /// Debounced cover-preview re-computation after grade/auto changes.
     private func scheduleGradePreview() {
         gradePreviewTask?.cancel()
         gradePreviewTask = Task {
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
             await updateGradedCoverPreview()
         }
@@ -732,35 +730,33 @@ struct ContentView: View {
 
     @MainActor
     private func updateGradedCoverPreview() async {
-        let isActive = !colorGrade.isIdentity || !autoFilterParams.isEmpty
-        guard isActive, let url = videoURL else { gradedCoverPreview = nil; return }
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore   = .zero
-        generator.requestedTimeToleranceAfter    = .zero
-        guard let (rawCG, _) = try? await generator.image(
-                at: CMTime(seconds: coverTime, preferredTimescale: 600)) else { return }
-        let grade  = colorGrade
-        let afp    = autoFilterParams
+        let active = !colorGrade.isIdentity || !autoFilterParams.isEmpty
+        guard active, let url = videoURL else { gradedCoverPreview = nil; return }
+        let t = CMTime(seconds: coverTime, preferredTimescale: 600)
+        let gen = AVAssetImageGenerator(asset: AVAsset(url: url))
+        gen.appliesPreferredTrackTransform = true
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter  = .zero
+        guard let (raw, _) = try? await gen.image(at: t) else { return }
+        let grade = colorGrade; let afp = autoFilterParams
         let graded = await Task.detached(priority: .userInitiated) {
-            grade.apply(to: rawCG, autoParams: afp)
+            grade.apply(to: raw, autoParams: afp)
         }.value
         gradedCoverPreview = NSImage(cgImage: graded,
                                      size: NSSize(width: graded.width, height: graded.height))
     }
 
-    /// Run CIAutoAdjust on the cover frame and store serialized filter params.
+    /// Run Apple's CIAutoAdjust on the cover frame and store serialized filter params.
     private func runAutoEnhance() {
         guard let url = videoURL else { return }
         Task {
-            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-            generator.appliesPreferredTrackTransform = true
-            generator.requestedTimeToleranceBefore   = .zero
-            generator.requestedTimeToleranceAfter    = .zero
-            guard let (cgImage, _) = try? await generator.image(
-                    at: CMTime(seconds: coverTime, preferredTimescale: 600)) else { return }
+            let t   = CMTime(seconds: coverTime, preferredTimescale: 600)
+            let gen = AVAssetImageGenerator(asset: AVAsset(url: url))
+            gen.appliesPreferredTrackTransform = true
+            gen.requestedTimeToleranceBefore = .zero; gen.requestedTimeToleranceAfter = .zero
+            guard let (raw, _) = try? await gen.image(at: t) else { return }
             let params = await Task.detached(priority: .background) {
-                ColorGrade.computeAutoFilterParams(from: cgImage)
+                ColorGrade.computeAutoFilterParams(from: raw)
             }.value
             await MainActor.run { autoFilterParams = params }
             scheduleGradePreview()
