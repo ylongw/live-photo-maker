@@ -199,7 +199,9 @@ class VideoProcessor: ObservableObject {
         asset: AVAsset,
         startTime: CMTime,
         endTime: CMTime,
-        settings: ExportSettings
+        settings: ExportSettings,
+        colorGrade: ColorGrade = .identity,
+        autoFilterParams: [(name: String, params: [String: Any])] = []
     ) async throws -> URL {
         isProcessing = true
         progress = 0
@@ -209,7 +211,12 @@ class VideoProcessor: ObservableObject {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mov")
 
-        let presetName = resolveAVPreset(settings: settings)
+        let needsGrade = !colorGrade.isIdentity || !autoFilterParams.isEmpty
+        // Passthrough preset cannot carry a videoComposition; upgrade automatically.
+        var presetName = resolveAVPreset(settings: settings)
+        if needsGrade && presetName == AVAssetExportPresetPassthrough {
+            presetName = AVAssetExportPresetHighestQuality
+        }
 
         try await exportWithExportSession(
             asset: asset,
@@ -217,7 +224,9 @@ class VideoProcessor: ObservableObject {
             endTime: endTime,
             presetName: presetName,
             outputURL: outputURL,
-            muteAudio: settings.muteAudio
+            muteAudio: settings.muteAudio,
+            colorGrade: needsGrade ? colorGrade : .identity,
+            autoFilterParams: needsGrade ? autoFilterParams : []
         )
 
         isProcessing = false
@@ -257,7 +266,9 @@ class VideoProcessor: ObservableObject {
         endTime: CMTime,
         presetName: String,
         outputURL: URL,
-        muteAudio: Bool = false
+        muteAudio: Bool = false,
+        colorGrade: ColorGrade = .identity,
+        autoFilterParams: [(name: String, params: [String: Any])] = []
     ) async throws {
         guard let session = AVAssetExportSession(asset: asset, presetName: presetName) else {
             throw LivePhotoError.exportSessionCreationFailed
@@ -267,6 +278,23 @@ class VideoProcessor: ObservableObject {
         session.outputFileType = .mov
         session.shouldOptimizeForNetworkUse = false
         session.timeRange = CMTimeRange(start: startTime, end: endTime)
+
+        // ── Color grading: attach a CIFilter-based video composition ─────────
+        if !colorGrade.isIdentity || !autoFilterParams.isEmpty {
+            // Capture value types for safe use inside the per-frame handler.
+            let grade = colorGrade
+            let afp   = autoFilterParams
+            let composition = AVMutableVideoComposition(
+                asset: asset,
+                applyingCIFiltersWithHandler: { request in
+                    let src = request.sourceImage.clampedToExtent()
+                    let out = grade.apply(to: src, autoParams: afp)
+                    request.finish(with: out.cropped(to: request.sourceImage.extent),
+                                   context: nil)
+                }
+            )
+            session.videoComposition = composition
+        }
 
         // Mute audio: set all audio track volumes to 0 via AVAudioMix.
         // The audio track is still present but silent (no re-encode needed).

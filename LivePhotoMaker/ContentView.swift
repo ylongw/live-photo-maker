@@ -92,6 +92,14 @@ struct ContentView: View {
     @State private var loopObserver:   Any? = nil
     @State private var isPortraitVideo = false   // auto-detected on video load
 
+    // ── Color grade ──────────────────────────────────────────────────────────
+    @State private var colorGrade          = ColorGrade()
+    @State private var autoEnhanceEnabled  = false
+    @State private var autoFilterParams:   [(name: String, params: [String: Any])] = []
+    @State private var colorPanelExpanded  = false
+    @State private var gradedCoverPreview: NSImage?
+    @State private var gradePreviewTask:   Task<Void, Never>?
+
     @StateObject private var l10n = L10n.shared
 
     var body: some View {
@@ -238,6 +246,8 @@ struct ContentView: View {
                                         .padding(.top, -4)
                                     exportSettingsPanel
                                         .padding(.horizontal, 16)
+                                    colorPanel
+                                        .padding(.horizontal, 16)
                                         .padding(.bottom, 16)
                                 }
                                 .padding(.vertical, 16)
@@ -284,6 +294,8 @@ struct ContentView: View {
 
                                 exportSettingsPanel
                                     .padding(.horizontal, 24)
+                                colorPanel
+                                    .padding(.horizontal, 24)
                                     .padding(.bottom, 100)
                             }
                         }
@@ -313,7 +325,7 @@ struct ContentView: View {
                 startTime: $startTime,
                 endTime:   $endTime,
                 thumbnails: thumbnails,
-                coverFramePreview: coverFramePreview
+                coverFramePreview: gradedCoverPreview ?? coverFramePreview
             )
             .padding(.top, coverFramePreview != nil ? 90 : 0)
         }
@@ -618,6 +630,143 @@ struct ContentView: View {
         }
     }
 
+    // ── Color Grade Panel ────────────────────────────────────────────────────
+
+    private var colorPanel: some View {
+        GlassCard(cornerRadius: 16) {
+            VStack(spacing: 0) {
+                // Header row — always visible
+                HStack {
+                    Label(l10n.colorGradeTitle, systemImage: "camera.filters")
+                        .font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    // Auto-enhance toggle
+                    Toggle(l10n.autoEnhance, isOn: $autoEnhanceEnabled)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .onChange(of: autoEnhanceEnabled) { on in
+                            if on { runAutoEnhance() }
+                            else  { autoFilterParams = []; scheduleGradePreview() }
+                        }
+                    Button {
+                        withAnimation(.spring(duration: 0.25)) { colorPanelExpanded.toggle() }
+                    } label: {
+                        Image(systemName: colorPanelExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+
+                if colorPanelExpanded {
+                    Divider().opacity(0.12)
+                    VStack(spacing: 8) {
+                        colorSliderRow(l10n.exposure,   $colorGrade.exposure,   -3...3,    neutral: 0)
+                        colorSliderRow(l10n.highlights, $colorGrade.highlights,  0...1,    neutral: 1)
+                        colorSliderRow(l10n.shadows,    $colorGrade.shadows,     0...1,    neutral: 0)
+                        colorSliderRow(l10n.contrast,   $colorGrade.contrast,    0.5...1.5, neutral: 1)
+                        colorSliderRow(l10n.brightness, $colorGrade.brightness, -0.5...0.5, neutral: 0)
+                        colorSliderRow(l10n.saturation, $colorGrade.saturation,  0...2,    neutral: 1)
+                        colorSliderRow(l10n.vibrance,   $colorGrade.vibrance,   -1...1,    neutral: 0)
+                        colorSliderRow(l10n.sharpness,  $colorGrade.sharpness,   0...2,    neutral: 0)
+
+                        if !colorGrade.isIdentity {
+                            Button {
+                                colorGrade = .identity
+                                scheduleGradePreview()
+                            } label: {
+                                Label(l10n.resetGrade, systemImage: "arrow.counterclockwise")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 14)
+                }
+            }
+        }
+    }
+
+    private func colorSliderRow(_ label: String,
+                                 _ value: Binding<Double>,
+                                 _ range: ClosedRange<Double>,
+                                 neutral: Double) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 52, alignment: .trailing)
+                .foregroundColor(.secondary)
+            Slider(value: value, in: range)
+                .onChange(of: value.wrappedValue) { _ in scheduleGradePreview() }
+            let delta = value.wrappedValue - neutral
+            Text(delta == 0 ? "—" : String(format: "%+.2f", delta))
+                .font(.system(size: 10, design: .monospaced))
+                .frame(width: 40, alignment: .trailing)
+                .foregroundColor(delta == 0 ? .secondary.opacity(0.35) : .accentColor)
+            Button { value.wrappedValue = neutral; scheduleGradePreview() } label: {
+                Circle()
+                    .fill(delta == 0 ? Color.clear : Color.accentColor.opacity(0.8))
+                    .frame(width: 7, height: 7)
+                    .overlay(Circle().stroke(Color.secondary.opacity(0.3), lineWidth: 0.5))
+            }
+            .buttonStyle(.plain)
+            .help("Reset")
+        }
+    }
+
+    // ── Color grade helpers ──────────────────────────────────────────────────
+
+    /// Debounced preview recompute — runs 150 ms after the last slider change.
+    private func scheduleGradePreview() {
+        gradePreviewTask?.cancel()
+        gradePreviewTask = Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            await updateGradedCoverPreview()
+        }
+    }
+
+    @MainActor
+    private func updateGradedCoverPreview() async {
+        let isActive = !colorGrade.isIdentity || !autoFilterParams.isEmpty
+        guard isActive, let url = videoURL else { gradedCoverPreview = nil; return }
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore   = .zero
+        generator.requestedTimeToleranceAfter    = .zero
+        guard let (rawCG, _) = try? await generator.image(
+                at: CMTime(seconds: coverTime, preferredTimescale: 600)) else { return }
+        let grade  = colorGrade
+        let afp    = autoFilterParams
+        let graded = await Task.detached(priority: .userInitiated) {
+            grade.apply(to: rawCG, autoParams: afp)
+        }.value
+        gradedCoverPreview = NSImage(cgImage: graded,
+                                     size: NSSize(width: graded.width, height: graded.height))
+    }
+
+    /// Run CIAutoAdjust on the cover frame and store serialized filter params.
+    private func runAutoEnhance() {
+        guard let url = videoURL else { return }
+        Task {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.appliesPreferredTrackTransform = true
+            generator.requestedTimeToleranceBefore   = .zero
+            generator.requestedTimeToleranceAfter    = .zero
+            guard let (cgImage, _) = try? await generator.image(
+                    at: CMTime(seconds: coverTime, preferredTimescale: 600)) else { return }
+            let params = await Task.detached(priority: .background) {
+                ColorGrade.computeAutoFilterParams(from: cgImage)
+            }.value
+            await MainActor.run { autoFilterParams = params }
+            scheduleGradePreview()
+        }
+    }
+
     private func xhsDurationWarning(maxDur: Double) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -766,6 +915,8 @@ struct ContentView: View {
         // Keep user's codec/resolution/quality/fps/mute settings across file switches.
         // Only reset per-file properties (HDR auto-detect, active preset, cover frame).
         exportSettings.exportHDR = false; activeCustomPreset = nil
+        colorGrade = .identity; autoEnhanceEnabled = false; autoFilterParams = []
+        gradedCoverPreview = nil; gradePreviewTask?.cancel()
         videoURL = url; coverFramePreview = nil; coverPreviewTask?.cancel()
         isPortraitVideo = false   // reset; detect below
         let avAsset = AVAsset(url: url)
@@ -795,13 +946,16 @@ struct ContentView: View {
             do {
                 processor.isProcessing = true; processor.statusMessage = l10n.statusExtractingCover; processor.progress = 0
                 let coverCM = CMTime(seconds: coverTime, preferredTimescale: 600)
-                let cgImage = try await processor.extractCoverFrame(asset: asset, at: coverCM, exportHDR: exportSettings.exportHDR)
+                let rawCoverImage = try await processor.extractCoverFrame(asset: asset, at: coverCM, exportHDR: exportSettings.exportHDR)
+                let cgImage = colorGrade.apply(to: rawCoverImage, autoParams: autoFilterParams)
                 processor.statusMessage = l10n.statusExportingClip; processor.progress = 0.1
                 let exportedURL = try await processor.exportVideo(
                     asset: asset,
                     startTime: CMTime(seconds: startTime, preferredTimescale: 600),
                     endTime:   CMTime(seconds: endTime,   preferredTimescale: 600),
-                    settings: exportSettings)
+                    settings: exportSettings,
+                    colorGrade: colorGrade,
+                    autoFilterParams: autoFilterParams)
 
                 let openPanel = NSOpenPanel()
                 openPanel.title = "Choose Save Location"
@@ -828,13 +982,16 @@ struct ContentView: View {
             do {
                 processor.isProcessing = true; processor.statusMessage = l10n.statusExtractingCover; processor.progress = 0
                 let coverCM = CMTime(seconds: coverTime, preferredTimescale: 600)
-                let cgImage = try await processor.extractCoverFrame(asset: asset, at: coverCM, exportHDR: exportSettings.exportHDR)
+                let rawCoverImage = try await processor.extractCoverFrame(asset: asset, at: coverCM, exportHDR: exportSettings.exportHDR)
+                let cgImage = colorGrade.apply(to: rawCoverImage, autoParams: autoFilterParams)
                 processor.progress = 0.1
                 let exportedURL = try await processor.exportVideo(
                     asset: asset,
                     startTime: CMTime(seconds: startTime, preferredTimescale: 600),
                     endTime:   CMTime(seconds: endTime,   preferredTimescale: 600),
-                    settings: exportSettings)
+                    settings: exportSettings,
+                    colorGrade: colorGrade,
+                    autoFilterParams: autoFilterParams)
                 processor.statusMessage = l10n.statusCreatingPair; processor.progress = 0.85
                 let tempDir = FileManager.default.temporaryDirectory
                     .appendingPathComponent("LivePhotoMaker_\(UUID().uuidString)")

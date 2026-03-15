@@ -126,6 +126,19 @@ final class L10n: ObservableObject {
         t("已保存！\(img) + \(vid)", "Saved! \(img) + \(vid)")
     }
 
+    // Color grade panel
+    var colorGradeTitle: String  { t("调色", "Color Grade") }
+    var autoEnhance: String      { t("自动增强", "Auto Enhance") }
+    var resetGrade: String       { t("重置参数", "Reset") }
+    var exposure: String         { t("曝光", "Exposure") }
+    var contrast: String         { t("对比度", "Contrast") }
+    var brightness: String       { t("亮度", "Brightness") }
+    var highlights: String       { t("高光", "Highlights") }
+    var shadows: String          { t("阴影", "Shadows") }
+    var saturation: String       { t("饱和度", "Saturation") }
+    var vibrance: String         { t("鲜艳度", "Vibrance") }
+    var sharpness: String        { t("清晰度", "Sharpness") }
+
     // Language toggle
     var langToggleLabel: String  { lang == .zh ? "EN" : "中" }
     var langToggleTooltip: String { lang == .zh ? "Switch to English" : "切换到中文" }
