@@ -333,29 +333,64 @@ struct ContentView: View {
     }
 
     private var quickControlsSection: some View {
-        HStack(spacing: 10) {
-            Toggle(isOn: $isLoopPreview) {
-                Label(l10n.loopPreview, systemImage: "repeat").font(.system(size: 12))
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                Toggle(isOn: $isLoopPreview) {
+                    Label(l10n.loopPreview, systemImage: "repeat").font(.system(size: 12))
+                }
+                .toggleStyle(.checkbox)
+                .onChange(of: isLoopPreview) { on in if on { startLoopPreview() } else { stopLoopPreview() } }
+                .onChange(of: startTime) { _ in
+                    if isLoopPreview { startLoopPreview() }
+                    // Clip changed: auto-enhance params are now stale, reset
+                    if autoEnhanceEnabled {
+                        autoEnhanceEnabled = false; autoFilterParams = []
+                        scheduleGradePreview(); updatePlayerComposition()
+                    }
+                }
+                .onChange(of: endTime) { _ in
+                    if isLoopPreview { startLoopPreview() }
+                    if autoEnhanceEnabled {
+                        autoEnhanceEnabled = false; autoFilterParams = []
+                        scheduleGradePreview(); updatePlayerComposition()
+                    }
+                }
+                if isLoopPreview {
+                    Text("\(formatTime(startTime)) – \(formatTime(endTime))")
+                        .font(.caption).foregroundColor(.secondary).monospacedDigit()
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.ultraThinMaterial).clipShape(Capsule())
+                }
+                Spacer()
+                Button {
+                    let t = CMTime(seconds: coverTime, preferredTimescale: 600)
+                    self.player?.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+                } label: {
+                    Label(l10n.seekToCover, systemImage: "camera.viewfinder").font(.system(size: 11))
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .help(l10n.seekTooltip)
             }
-            .toggleStyle(.checkbox)
-            .onChange(of: isLoopPreview) { on in if on { startLoopPreview() } else { stopLoopPreview() } }
-            .onChange(of: startTime) { _ in if isLoopPreview { startLoopPreview() } }
-            .onChange(of: endTime)   { _ in if isLoopPreview { startLoopPreview() } }
-            if isLoopPreview {
-                Text("\(formatTime(startTime)) – \(formatTime(endTime))")
-                    .font(.caption).foregroundColor(.secondary).monospacedDigit()
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(.ultraThinMaterial).clipShape(Capsule())
+
+            // ── Auto Enhance row (below preview, always visible) ──────────────
+            HStack(spacing: 8) {
+                Toggle(isOn: $autoEnhanceEnabled) {
+                    Label(l10n.autoEnhance, systemImage: "wand.and.stars")
+                        .font(.system(size: 12))
+                }
+                .toggleStyle(.checkbox)
+                .onChange(of: autoEnhanceEnabled) { on in
+                    if on { runAutoEnhance() }
+                    else  { autoFilterParams = []; scheduleGradePreview(); updatePlayerComposition() }
+                }
+                if autoEnhanceEnabled {
+                    Text("✓ \(l10n.autoEnhance)")
+                        .font(.caption).foregroundColor(.green)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.green.opacity(0.12)).clipShape(Capsule())
+                }
+                Spacer()
             }
-            Spacer()
-            Button {
-                let t = CMTime(seconds: coverTime, preferredTimescale: 600)
-                self.player?.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
-            } label: {
-                Label(l10n.seekToCover, systemImage: "camera.viewfinder").font(.system(size: 11))
-            }
-            .buttonStyle(.bordered).controlSize(.small)
-            .help(l10n.seekTooltip)
         }
     }
 
@@ -642,16 +677,10 @@ struct ContentView: View {
                     HStack(spacing: 10) {
                         Label(l10n.colorGradeTitle, systemImage: "camera.filters")
                             .font(.system(size: 13, weight: .semibold))
+                        if !colorGrade.isIdentity {
+                            Text("●").font(.system(size: 8)).foregroundColor(.accentColor)
+                        }
                         Spacer()
-                        // Auto Enhance toggle (always accessible without expanding)
-                        Toggle(l10n.autoEnhance, isOn: $autoEnhanceEnabled)
-                            .toggleStyle(.switch)
-                            .controlSize(.mini)
-                            .onChange(of: autoEnhanceEnabled) { on in
-                                if on { runAutoEnhance() }
-                                else  { autoFilterParams = []; scheduleGradePreview() }
-                            }
-                            .onTapGesture {} // prevent toggle tap from collapsing panel
                         Image(systemName: colorPanelExpanded ? "chevron.up" : "chevron.down")
                             .font(.system(size: 10)).foregroundColor(.secondary)
                     }
@@ -671,6 +700,9 @@ struct ContentView: View {
                         colorSliderRow(l10n.saturation, value: $colorGrade.saturation, range: 0...2,      neutral: 1)
                         colorSliderRow(l10n.vibrance,   value: $colorGrade.vibrance,   range: -1...1,     neutral: 0)
                         colorSliderRow(l10n.sharpness,  value: $colorGrade.sharpness,  range: 0...2,      neutral: 0)
+                        Divider().opacity(0.1)
+                        colorSliderRow(l10n.warmth,     value: $colorGrade.warmth,     range: -100...100, neutral: 0)
+                        colorSliderRow(l10n.tint,       value: $colorGrade.tint,       range: -100...100, neutral: 0)
 
                         if !colorGrade.isIdentity {
                             Button { colorGrade = .identity; scheduleGradePreview() } label: {
@@ -720,6 +752,7 @@ struct ContentView: View {
     // ── Color grade helpers ────────────────────────────────────────────────────
     /// Debounced cover-preview re-computation after grade/auto changes.
     private func scheduleGradePreview() {
+        updatePlayerComposition()   // update loop preview immediately
         gradePreviewTask?.cancel()
         gradePreviewTask = Task {
             try? await Task.sleep(for: .milliseconds(200))
@@ -760,6 +793,29 @@ struct ContentView: View {
             }.value
             await MainActor.run { autoFilterParams = params }
             scheduleGradePreview()
+            updatePlayerComposition()
+        }
+    }
+
+    /// Attach or remove color-grade CIFilter composition on the AVPlayerItem
+    /// so Loop Preview reflects the current grade in real time.
+    @MainActor
+    private func updatePlayerComposition() {
+        guard let playerItem = player?.currentItem, let asset = asset else { return }
+        let isActive = !colorGrade.isIdentity || !autoFilterParams.isEmpty
+        if isActive {
+            let grade = colorGrade; let afp = autoFilterParams
+            let comp = AVMutableVideoComposition(
+                asset: asset,
+                applyingCIFiltersWithHandler: { request in
+                    let src = request.sourceImage.clampedToExtent()
+                    let out = grade.apply(to: src, autoParams: afp)
+                    request.finish(with: out.cropped(to: request.sourceImage.extent), context: nil)
+                }
+            )
+            playerItem.videoComposition = comp
+        } else {
+            playerItem.videoComposition = nil
         }
     }
 

@@ -13,6 +13,8 @@ struct ColorGrade: Equatable {
     var shadows:    Double = 0.0  // CIHighlightShadowAdjust inputShadowAmount: 0…1 (0 = no lift)
     var vibrance:   Double = 0.0  // CIVibrance inputAmount: -1…1 (0 = neutral)
     var sharpness:  Double = 0.0  // CISharpenLuminance inputSharpness: 0…2 (0 = neutral)
+    var warmth:     Double = 0.0  // CITemperatureAndTint offset: -100…+100 (0 = neutral ≈ 6500K)
+    var tint:       Double = 0.0  // CITemperatureAndTint tint: -100…+100 (0 = neutral)
 
     static let identity = ColorGrade()
     var isIdentity: Bool { self == .identity }
@@ -76,6 +78,20 @@ struct ColorGrade: Equatable {
             if let f = CIFilter(name: "CISharpenLuminance") {
                 f.setValue(img, forKey: kCIInputImageKey)
                 f.setValue(sharpness, forKey: "inputSharpness")
+                if let o = f.outputImage { img = o }
+            }
+        }
+
+        // 7. Warmth / Tint (CITemperatureAndTint)
+        // inputNeutral = current source temperature (assumed 6500K)
+        // inputTargetNeutral = desired temperature after shift
+        if warmth != 0 || tint != 0 {
+            if let f = CIFilter(name: "CITemperatureAndTint") {
+                let neutralTemp = 6500.0
+                let targetTemp  = neutralTemp + warmth * 30.0  // ±100 maps to ±3000K
+                f.setValue(img, forKey: kCIInputImageKey)
+                f.setValue(CIVector(x: neutralTemp, y: 0),    forKey: "inputNeutral")
+                f.setValue(CIVector(x: targetTemp,  y: tint), forKey: "inputTargetNeutral")
                 if let o = f.outputImage { img = o }
             }
         }

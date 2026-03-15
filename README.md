@@ -1,6 +1,6 @@
 # LivePhotoMaker
 
-Convert any video into an Apple Live Photo on macOS — with full HDR support. No Xcode required.
+Convert any video into an Apple Live Photo on macOS. No Xcode required.
 
 ![macOS](https://img.shields.io/badge/macOS-13%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-5-orange)
@@ -11,58 +11,65 @@ Convert any video into an Apple Live Photo on macOS — with full HDR support. N
 
 ## Features
 
-### 🎬 Video Preview & Playback
+### 🎬 Video Preview & Timeline
 - Full AVKit player with standard controls
-- **HDR badge** auto-detected — shows when source is HLG or PQ
+- Thumbnail strip timeline — **drag yellow handles** to set start/end, **drag red marker** to pick cover frame
+- **Live preview bubble** floats above the cover marker while dragging
+- **Loop Preview** — loops within the selected clip range; updates in real time as you adjust handles
+- **Seek to Cover** — jumps playhead to the current cover frame position
 
-### ✂️ Timeline Trim Selection
-- Thumbnail strip showing the full video at a glance
-- **Drag the yellow handles** directly on the strip to set start and end
-- **Drag the middle** of the selection to pan it (clip duration stays fixed)
-- Precision sliders below for fine adjustments
+### ✂️ Clip Trimming
+- Drag handles or use precision sliders; total / clip duration shown
+- Platform presets: **小红书 XHS** (≤2.8 s, H.264 720p SDR) and **抖音** automatically fill recommended values
 
-### 🔴 Cover Frame Selection
-- Drag the **red marker** on the timeline to pick any frame as the still photo
-- **Live preview bubble** — a 96×54 thumbnail floats above the handle while dragging, so you see exactly what frame you're selecting
-
-### 🔁 Loop Preview
-- Tick **Loop Preview** → player immediately seeks to the start of your selection and loops within it
-- Adjust the trim handles while looping — the range updates in real time
-- Confirm the Live Photo video looks right before exporting
+### 🎨 Color Grading (NEW)
+- **Auto Enhance** — one checkbox runs `CIImage.autoAdjustmentFilters()` (the same API as Apple Photos' magic wand) on the cover frame, derives color adjustments, and applies them uniformly to every video frame — no flicker
+- **10 manual sliders** (expand the Color Grade panel): Exposure / Contrast / Brightness / Highlights / Shadows / Saturation / Vibrance / Sharpness / **Warmth** / **Tint**
+- Loop Preview reflects color grade in real time via `AVPlayerItem.videoComposition`
+- Color grade applied to both the cover HEIC and the exported MOV
+- Auto Enhance resets when you change the clip selection (stale analysis warning)
 
 ### 🌈 HDR-Aware Export
-- When an HDR source is detected, an **Export HDR** checkbox appears:
-  - ✅ **On** (default) — encodes to **HEVC / H.265**, preserving HLG color space end-to-end
-  - ☐ **Off** — encodes to H.264, tone-mapping to SDR
-- Cover frame uses `AVAssetImageGenerator` with `dynamicRangePolicy = .matchSource` (macOS 15+) to extract a true HDR `CGImage`; HEIC written with `kCGImageDestinationOptimizeColorForSharing = false` so the HLG color space is preserved
+- **Export HDR** checkbox appears automatically when an HLG/PQ source is detected
+- HDR path: HEVC + `dynamicRangePolicy = .matchSource` on `AVAssetImageGenerator`; HEIC written with `kCGImageDestinationOptimizeColorForSharing = false`
 
-### ⚡ Bitrate Selection
-| Option | Codec | Use case |
-|--------|-------|---------|
-| Low (8 Mbps) | HEVC or H.264 | Share / upload |
-| Medium (16 Mbps) | HEVC or H.264 | Balanced (default) |
-| High (32 Mbps) | HEVC or H.264 | Archive quality |
-| Original | Passthrough | Lossless — no re-encode |
+### ⚙️ Flexible Export Settings
+| Setting | Options |
+|---------|---------|
+| Codec | H.264 / HEVC (H.265, default) |
+| Resolution | 720p / 1080p / 4K / Source |
+| Quality | Low / High / Source (passthrough) |
+| Frame Rate | 24 / 30 / 60 / Source |
+| Audio | Keep / **Mute** |
+| HDR | On / Off (SDR sources: N/A) |
+
+### 📁 File Queue Sidebar
+- Drag multiple files into the sidebar to build a batch list
+- Click to switch between files; settings persist across switches
+- Right-click → **Remove from List** or **Move to Trash**; `⌘⌫` to trash the selected file
+
+### 🌐 Bilingual UI
+- Default: Chinese (中文) — click **EN** in the top bar to switch to English; preference persists
 
 ### 📸 Export Options
-- **Save to Photos** — imports the Live Photo pair directly into Photos.app via `PHPhotoLibrary` (asks for access on first use)
-- **Create Live Photo** — saves the paired HEIC + MOV files to any folder you choose
+- **Save to Photos** — imports the Live Photo pair directly into Photos.app via `PHPhotoLibrary`
+- **Create Live Photo** — saves HEIC + MOV files to any folder you choose
 
 ---
 
 ## How Live Photos Work
 
-Apple Live Photos are a **HEIC image + MOV video** pair that share a `Content Identifier` UUID:
+Apple Live Photos are a **HEIC image + MOV video** pair sharing a `Content Identifier` UUID:
 
-| File | Metadata location | Key |
-|------|-------------------|-----|
-| HEIC | MakerApple EXIF dictionary | key `"17"` via `kCGImagePropertyMakerAppleDictionary` |
-| MOV | QuickTime metadata | `com.apple.quicktime.content.identifier` |
-| MOV | Timed metadata track | `com.apple.quicktime.still-image-time = -1` |
+| File | Key | Value |
+|------|-----|-------|
+| HEIC | `kCGImagePropertyMakerAppleDictionary["17"]` | UUID string |
+| MOV | `com.apple.quicktime.content.identifier` | same UUID |
+| MOV | `com.apple.quicktime.still-image-time` | cover frame offset (seconds, float32) |
 
-LivePhotoMaker writes this UUID natively using CoreGraphics and AVFoundation — no external tools required.
+LivePhotoMaker writes all metadata natively via CoreGraphics + AVFoundation — no `exiftool` required.
 
-When importing via `PHPhotoLibrary.performChanges`, the `.photo` + `.pairedVideo` resource types tell Photos to recognize the pair as a Live Photo automatically.
+> **Make Key Photo** in iOS Photos requires `still-image-time` to be the actual time offset of the cover frame within the trimmed clip, not the sentinel value `-1`.
 
 ---
 
@@ -70,7 +77,7 @@ When importing via `PHPhotoLibrary.performChanges`, the `.photo` + `.pairedVideo
 
 - **macOS 13.0+** (HDR cover frame requires macOS 15+)
 - **Apple Silicon (arm64)**
-- **Xcode Command Line Tools** — no full Xcode needed
+- **Xcode Command Line Tools**
 
 ```bash
 xcode-select --install
@@ -78,27 +85,18 @@ xcode-select --install
 
 ---
 
-## Install (from release DMG)
+## Install
 
 1. Download `LivePhotoMaker.dmg` from [Releases](https://github.com/ylongw/live-photo-maker/releases)
-2. Open the DMG and drag **LivePhotoMaker.app** to Applications
+2. Open the DMG → drag **LivePhotoMaker.app** to Applications
 
-### ⚠️ Gatekeeper Warning on First Launch
+### ⚠️ Gatekeeper on First Launch
 
-This app is ad-hoc signed (no paid Apple Developer certificate). macOS will block it on first open.
+**System Settings → Privacy & Security → Open Anyway**, or:
 
-**Option A — System Settings (no Terminal):**
-1. Try to open the app — click **Done** when macOS shows "Not Opened"
-2. **System Settings → Privacy & Security**
-3. Scroll down → **"LivePhotoMaker was blocked"** → click **Open Anyway**
-4. Confirm in the next dialog
-
-**Option B — Terminal:**
 ```bash
 xattr -dr com.apple.quarantine /Applications/LivePhotoMaker.app
 ```
-
-> Build from source with `./build.sh` on your own machine to avoid Gatekeeper entirely.
 
 ---
 
@@ -111,32 +109,7 @@ cd live-photo-maker
 open LivePhotoMaker.app
 ```
 
-`build.sh` compiles all Swift sources with `swiftc`, packages the `.app` bundle, and signs it ad-hoc. No Xcode, no Swift Package Manager, no dependencies.
-
----
-
-## Usage
-
-1. **Open a video** — drag & drop MOV / MP4 / M4V, or click "Open Video"
-2. **Trim the clip** — drag the yellow handles on the timeline (recommended: 2–5 s)
-3. **Pick a cover frame** — drag the red marker; a preview bubble shows the selected frame
-4. **Preview** — tick **Loop Preview** to see exactly how the Live Photo will play
-5. **Set quality** — choose bitrate; for HDR sources, keep **Export HDR** checked
-6. **Export**:
-   - **Save to Photos** → imports directly into Photos.app as a Live Photo
-   - **Create Live Photo** → saves HEIC + MOV pair to a folder
-
----
-
-## Background
-
-macOS doesn't expose `PHAssetResourceType.pairedVideo` at the app level, making programmatic Live Photo creation far harder than on iOS. This project explores the file-format level solution:
-
-- Native UUID injection via CoreGraphics + AVFoundation (no `exiftool`)
-- `AVAssetImageGenerator` for HDR-preserving frame extraction (vs. ffmpeg which strips HLG)
-- `AVAssetExportSession` for trim + HDR-preserving encode
-
-See also: [`makelive`](https://github.com/RhetTbull/makelive) — the Python equivalent.
+No Xcode, no Swift Package Manager, no dependencies.
 
 ---
 

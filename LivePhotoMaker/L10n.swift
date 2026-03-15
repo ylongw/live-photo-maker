@@ -138,6 +138,9 @@ final class L10n: ObservableObject {
     var saturation: String       { t("饱和度", "Saturation") }
     var vibrance: String         { t("鲜艳度", "Vibrance") }
     var sharpness: String        { t("清晰度", "Sharpness") }
+    var warmth: String           { t("色温", "Warmth") }
+    var tint: String             { t("色调", "Tint") }
+    var autoEnhanceStale: String { t("选区已更改，请重新触发自动增强", "Clip changed — re-enable Auto Enhance") }
 
     // Language toggle
     var langToggleLabel: String  { lang == .zh ? "EN" : "中" }
